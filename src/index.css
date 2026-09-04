@@ -1,0 +1,251 @@
+@import 'tailwindcss';
+
+/*
+  HandyCap reads as a precision instrument: a rangefinder or a leaderboard,
+  not a lifestyle app. Near-black with a green cast, one signal green, and
+  oversized tabular numerals doing the talking.
+
+  Sun readability drives the palette: high contrast throughout, and no
+  low-opacity grey text anywhere a number needs reading on the first tee.
+*/
+
+@theme {
+  --font-display: 'Archivo', ui-sans-serif, system-ui, sans-serif;
+  --font-prose: 'Newsreader', ui-serif, Georgia, serif;
+
+  --color-ground: #0a0f0c;
+  --color-surface: #111a14;
+  --color-raised: #17231b;
+  --color-hairline: #26332b;
+  --color-hairline-strong: #3a4b40;
+
+  --color-ink: #edf2ee;
+  --color-ink-dim: #9dada2;
+  --color-ink-faint: #6b7a70;
+
+  --color-signal: #6ee787;
+  --color-signal-deep: #2f8f4a;
+  --color-amber: #f0b429;
+  --color-flag: #e5674b;
+}
+
+:root {
+  color-scheme: dark;
+  --ground: #0a0f0c;
+  --surface: #111a14;
+  --raised: #17231b;
+  --hairline: #26332b;
+  --hairline-strong: #3a4b40;
+  --ink: #edf2ee;
+  --ink-dim: #9dada2;
+  --ink-faint: #6b7a70;
+  --signal: #6ee787;
+  --signal-deep: #2f8f4a;
+  --amber: #f0b429;
+  --flag: #e5674b;
+  --shadow-lift: 0 1px 0 rgb(255 255 255 / 0.04), 0 8px 24px rgb(0 0 0 / 0.4);
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+  --ground: #f2f0e9;
+  --surface: #ffffff;
+  --raised: #fbfaf6;
+  --hairline: #ddd9cc;
+  --hairline-strong: #b9b3a1;
+  --ink: #101710;
+  --ink-dim: #55604f;
+  --ink-faint: #7d8878;
+  --signal: #1c7a3c;
+  --signal-deep: #14562a;
+  --amber: #9a6a05;
+  --flag: #ac3d24;
+  --shadow-lift: 0 1px 2px rgb(16 23 16 / 0.06), 0 8px 24px rgb(16 23 16 / 0.08);
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--font-display);
+  font-variant-numeric: tabular-nums;
+  /*
+    A faint scorecard grid. It reads as texture rather than pattern, and gives
+    the near-black ground somewhere to catch the light.
+  */
+  background-image:
+    linear-gradient(to right, color-mix(in oklab, var(--hairline) 26%, transparent) 1px, transparent 1px),
+    linear-gradient(to bottom, color-mix(in oklab, var(--hairline) 26%, transparent) 1px, transparent 1px);
+  background-size: 72px 72px;
+  background-attachment: fixed;
+  overscroll-behavior-y: none;
+}
+
+/* --- type ------------------------------------------------------------- */
+
+.numeral {
+  font-family: var(--font-display);
+  font-variation-settings: 'wdth' 118, 'wght' 620;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.label {
+  font-variation-settings: 'wdth' 95, 'wght' 620;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 0.6875rem;
+  color: var(--ink-faint);
+}
+
+.prose-note {
+  font-family: var(--font-prose);
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--ink-dim);
+}
+
+/* --- surfaces --------------------------------------------------------- */
+
+.panel {
+  background: color-mix(in oklab, var(--surface) 92%, transparent);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  backdrop-filter: blur(6px);
+}
+
+.hairline-top {
+  border-top: 1px solid var(--hairline);
+}
+
+/* --- the scoring record strip ----------------------------------------- */
+/*
+  Twenty bars, one per score in the record, with the eight that actually count
+  lit. This is the whole "best 8 of 20" rule expressed as an object rather than
+  a sentence, and it is the app's signature.
+*/
+
+.record-strip {
+  display: grid;
+  grid-template-columns: repeat(20, 1fr);
+  gap: 3px;
+  align-items: end;
+  height: 46px;
+}
+
+.record-bar {
+  border-radius: 2px;
+  background: var(--hairline-strong);
+  transition: height 240ms cubic-bezier(0.2, 0.8, 0.2, 1), background-color 240ms ease;
+  min-height: 4px;
+}
+
+.record-bar[data-counting='true'] {
+  background: var(--signal);
+  box-shadow: 0 0 12px color-mix(in oklab, var(--signal) 40%, transparent);
+}
+
+.record-bar[data-empty='true'] {
+  background: color-mix(in oklab, var(--hairline) 70%, transparent);
+  height: 4px !important;
+}
+
+/* --- controls --------------------------------------------------------- */
+
+.tap {
+  transition: transform 120ms cubic-bezier(0.2, 0.8, 0.2, 1), background-color 140ms ease;
+}
+.tap:active {
+  transform: scale(0.96);
+}
+
+.stepper-button {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  border: 1px solid var(--hairline);
+  background: var(--raised);
+  color: var(--ink);
+  font-size: 1.25rem;
+  line-height: 1;
+}
+.stepper-button:disabled {
+  opacity: 0.35;
+}
+
+.chip {
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 0.4rem 0.8rem;
+  font-size: 0.8125rem;
+  font-variation-settings: 'wght' 560;
+  background: transparent;
+  color: var(--ink-dim);
+}
+.chip[data-selected='true'] {
+  border-color: var(--signal);
+  color: var(--ground);
+  background: var(--signal);
+}
+
+.field {
+  width: 100%;
+  background: var(--raised);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 0.75rem 0.9rem;
+  color: var(--ink);
+  font-size: 1rem;
+  font-family: var(--font-display);
+}
+.field::placeholder {
+  color: var(--ink-faint);
+}
+.field:focus {
+  outline: 2px solid var(--signal);
+  outline-offset: -1px;
+}
+
+.primary-action {
+  background: var(--signal);
+  color: #06210f;
+  border-radius: 12px;
+  font-variation-settings: 'wdth' 105, 'wght' 700;
+  letter-spacing: 0.02em;
+}
+.primary-action:disabled {
+  background: var(--hairline-strong);
+  color: var(--ink-faint);
+}
+
+/* --- motion ------------------------------------------------------------ */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rise {
+  animation: rise 460ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise,
+  .record-bar,
+  .tap {
+    animation: none !important;
+    transition: none !important;
+  }
+}
