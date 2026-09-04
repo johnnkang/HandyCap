@@ -15,7 +15,24 @@ npm run dev        # http://localhost:5173
 npm test           # the engine's test suite
 npm run typecheck
 npm run build
+npm run preview    # the production build, with the service worker live
+npm run icons      # regenerate the app icons
 ```
+
+The service worker only runs against a real build, so test install and offline
+behaviour with `npm run preview`, not `npm run dev`.
+
+## Deploying
+
+The app is a static build with an SPA rewrite; `vercel.json` is set up for it.
+
+```bash
+npx vercel login
+npx vercel --prod
+```
+
+Installing to a phone home screen needs HTTPS, so it only works from a deployed
+URL, not from localhost on your phone.
 
 ## How it is put together
 
@@ -63,6 +80,15 @@ upstream database.
 
 HandyCap is not a licensed handicap provider. It tracks your official index
 closely; it does not replace it.
+
+## Offline
+
+The app shell, icons and fonts are precached, so HandyCap opens with no signal.
+Courses you have looked at are kept in IndexedDB and stay selectable offline —
+verified with the network genuinely disabled: the app loaded, the record was
+intact, and a cached course still offered all of its rated tees.
+
+Your rounds live only on this device. Export a JSON backup from the About sheet.
 
 ## Course data
 

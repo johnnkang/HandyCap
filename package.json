@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "icons": "node scripts/generate-icons.mjs"
   },
   "dependencies": {
     "idb-keyval": "^6.3.0",

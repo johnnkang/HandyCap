@@ -5,6 +5,7 @@ import { RoundsScreen } from './ui/screens/RoundsScreen'
 import { InsightsScreen } from './ui/screens/InsightsScreen'
 import { ForecastScreen } from './ui/screens/ForecastScreen'
 import { PostRoundScreen } from './ui/screens/PostRoundScreen'
+import { AboutScreen, useStoredTheme } from './ui/screens/AboutScreen'
 
 type Tab = 'index' | 'rounds' | 'insights' | 'forecast'
 
@@ -29,6 +30,10 @@ export function App() {
 function Shell() {
   const [tab, setTab] = useState<Tab>('index')
   const [posting, setPosting] = useState(false)
+  const [showAbout, setShowAbout] = useState(false)
+
+  // Restores the saved appearance choice on load.
+  useStoredTheme()
 
   if (posting) {
     return (
@@ -52,8 +57,23 @@ function Shell() {
         >
           HANDY<span style={{ color: 'var(--signal)' }}>CAP</span>
         </span>
-        <PendingBadge />
+        <div className="flex items-center gap-3">
+          <PendingBadge />
+          <button
+            type="button"
+            onClick={() => setShowAbout(true)}
+            className="tap grid h-8 w-8 place-items-center rounded-full border"
+            style={{ borderColor: 'var(--hairline)', color: 'var(--ink-dim)' }}
+            aria-label="About HandyCap and your data"
+          >
+            <span aria-hidden="true" className="text-sm">
+              i
+            </span>
+          </button>
+        </div>
       </header>
+
+      {showAbout && <AboutScreen onClose={() => setShowAbout(false)} />}
 
       {tab === 'index' && <IndexScreen />}
       {tab === 'rounds' && <RoundsScreen />}

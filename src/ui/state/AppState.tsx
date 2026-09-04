@@ -20,6 +20,8 @@ interface AppState {
   loading: boolean
   saveRound: (round: Round) => Promise<void>
   deleteRound: (id: string) => Promise<void>
+  /** Re-read everything from storage, after an import replaces the record. */
+  reload: () => Promise<void>
   repository: Repository
   courses: OpenGolfClient
   courseCache: CourseCache
@@ -80,6 +82,10 @@ export function AppProvider({
     [repo],
   )
 
+  const reload = useCallback(async () => {
+    setRounds(await repo.loadRounds())
+  }, [repo])
+
   // The whole record is replayed on every change. With a scoring record of a
   // few hundred rounds that is microseconds, and it makes the index and every
   // derived stat impossible to get out of sync.
@@ -92,11 +98,12 @@ export function AppProvider({
       loading,
       saveRound,
       deleteRound,
+      reload,
       repository: repo,
       courses: client,
       courseCache: cache,
     }),
-    [rounds, record, loading, saveRound, deleteRound, repo, client, cache],
+    [rounds, record, loading, saveRound, deleteRound, reload, repo, client, cache],
   )
 
   return <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>

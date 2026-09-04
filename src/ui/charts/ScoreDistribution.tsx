@@ -6,49 +6,29 @@ import {
   toCounts,
   type ScoreClass,
 } from './scoringScale'
+import { divergingLayout } from './divergingLayout'
 import type { ParTypeStats } from '@/domain/stats/parTypeStats'
-
-interface Row {
-  label: string
-  counts: Record<ScoreClass, number>
-  total: number
-}
 
 /**
  * A diverging stacked bar per par type, centred on par.
  *
- * Under-par scoring runs left of the centre line and over-par runs right, with
- * par itself straddling it. Rows share one origin, so the reader compares par
- * types by how far each spills to the right without doing any arithmetic.
+ * Under-par scoring runs left of the centre line and over-par runs right, so a
+ * reader sees at a glance which par types cost them strokes. Geometry lives in
+ * `divergingLayout`, which is tested separately.
  */
 export function ScoreDistribution({ byPar }: { byPar: ParTypeStats[] }) {
   const [active, setActive] = useState<{ row: string; scoreClass: ScoreClass } | null>(null)
 
-  const rows: Row[] = byPar.map((parType) => {
-    const counts = toCounts(parType.distribution)
-    return {
-      label: `Par ${parType.par}`,
-      counts,
-      total: parType.holesPlayed,
-    }
-  })
+  const rows = byPar.map((parType) => ({
+    key: `Par ${parType.par}`,
+    counts: toCounts(parType.distribution),
+    total: parType.holesPlayed,
+  }))
 
   if (rows.length === 0) return null
 
-  const share = (row: Row, scoreClass: ScoreClass) =>
-    row.total === 0 ? 0 : (row.counts[scoreClass] / row.total) * 100
-
-  // One shared origin across rows: the widest left arm sets where centre sits.
-  const leftArm = (row: Row) => share(row, 'birdieOrBetter') + share(row, 'par') / 2
-  const rightArm = (row: Row) =>
-    share(row, 'par') / 2 +
-    share(row, 'bogey') +
-    share(row, 'doubleBogey') +
-    share(row, 'tripleOrWorse')
-
-  const maxLeft = Math.max(...rows.map(leftArm), 1)
-  const maxRight = Math.max(...rows.map(rightArm), 1)
-  const fullWidth = maxLeft + maxRight
+  const layout = divergingLayout(rows, SCORE_CLASSES, 'par')
+  const rowByKey = new Map(rows.map((row) => [row.key, row]))
 
   return (
     <figure className="m-0">
@@ -57,62 +37,55 @@ export function ScoreDistribution({ byPar }: { byPar: ParTypeStats[] }) {
       </figcaption>
 
       <div className="relative">
-        {/* The par line. Everything right of it cost you strokes. */}
+        {/* The par line. Everything right of it cost strokes. */}
         <div
           aria-hidden="true"
           className="absolute inset-y-0 w-px"
-          style={{ left: `${(maxLeft / fullWidth) * 100}%`, background: 'var(--hairline-strong)' }}
+          style={{ left: `${layout.centre}%`, background: 'var(--hairline-strong)' }}
         />
 
         <div className="space-y-3">
-          {rows.map((row) => {
-            let cursor = maxLeft - leftArm(row)
-            return (
-              <div key={row.label} className="flex items-center gap-3">
-                <span className="label w-12 shrink-0">{row.label}</span>
-                <div className="relative h-7 flex-1">
-                  {SCORE_CLASSES.map((scoreClass) => {
-                    const width = share(row, scoreClass)
-                    const left = cursor
-                    cursor += width
-                    if (width === 0) return null
-                    const isActive =
-                      active?.row === row.label && active.scoreClass === scoreClass
-                    return (
-                      <button
-                        key={scoreClass}
-                        type="button"
-                        onClick={() =>
-                          setActive(isActive ? null : { row: row.label, scoreClass })
-                        }
-                        className="absolute inset-y-0"
-                        style={{
-                          left: `${(left / fullWidth) * 100}%`,
-                          width: `calc(${(width / fullWidth) * 100}% - 2px)`,
-                          background: scoreClassColor[scoreClass],
-                          borderRadius: '3px',
-                          outline: isActive ? '2px solid var(--ink)' : 'none',
-                          outlineOffset: '1px',
-                        }}
-                        aria-label={`${row.label}: ${row.counts[scoreClass]} ${scoreClassLabel[scoreClass]}`}
-                      >
-                        {/* Counts sit on any segment wide enough to hold them,
-                            which is also the relief the light-mode amber needs. */}
-                        {width / fullWidth > 0.12 && (
-                          <span
-                            className="numeral text-[11px]"
-                            style={{ color: '#0a0f0c', mixBlendMode: 'normal' }}
-                          >
-                            {row.counts[scoreClass]}
-                          </span>
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
+          {layout.rows.map((row) => (
+            <div key={row.key} className="flex items-center gap-3">
+              <span className="label w-12 shrink-0">{row.key}</span>
+              <div className="relative h-7 flex-1">
+                {row.segments.map((segment) => {
+                  const isActive =
+                    active?.row === row.key && active.scoreClass === segment.scoreClass
+                  return (
+                    <button
+                      key={segment.scoreClass}
+                      type="button"
+                      onClick={() =>
+                        setActive(
+                          isActive ? null : { row: row.key, scoreClass: segment.scoreClass },
+                        )
+                      }
+                      className="absolute inset-y-0 grid place-items-center"
+                      style={{
+                        left: `${segment.left}%`,
+                        // A 2px surface gap keeps adjacent fills from merging.
+                        width: `calc(${segment.width}% - 2px)`,
+                        background: scoreClassColor[segment.scoreClass],
+                        borderRadius: '3px',
+                        outline: isActive ? '2px solid var(--ink)' : 'none',
+                        outlineOffset: '1px',
+                      }}
+                      aria-label={`${row.key}: ${segment.count} ${scoreClassLabel[segment.scoreClass]}`}
+                    >
+                      {/* Counts sit on any segment wide enough to hold them. This
+                          is also the relief the light-mode amber's contrast needs. */}
+                      {segment.width > 12 && (
+                        <span className="numeral text-[11px]" style={{ color: '#0a0f0c' }}>
+                          {segment.count}
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
               </div>
-            )
-          })}
+            </div>
+          ))}
         </div>
       </div>
 
@@ -120,10 +93,10 @@ export function ScoreDistribution({ byPar }: { byPar: ParTypeStats[] }) {
         <p className="prose-note mt-3">
           {active.row}:{' '}
           <strong style={{ color: 'var(--ink)' }}>
-            {rows.find((row) => row.label === active.row)!.counts[active.scoreClass]}
+            {rowByKey.get(active.row)!.counts[active.scoreClass]}
           </strong>{' '}
           {scoreClassLabel[active.scoreClass].toLowerCase()} out of{' '}
-          {rows.find((row) => row.label === active.row)!.total} holes.
+          {rowByKey.get(active.row)!.total} holes.
         </p>
       )}
 
