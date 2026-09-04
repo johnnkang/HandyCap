@@ -22,17 +22,21 @@ npm run icons      # regenerate the app icons
 The service worker only runs against a real build, so test install and offline
 behaviour with `npm run preview`, not `npm run dev`.
 
-## Deploying
+## Deployed
 
-The app is a static build with an SPA rewrite; `vercel.json` is set up for it.
+**https://handycap-psi.vercel.app**
+
+Open it on a phone and use Add to Home Screen; installing needs HTTPS, so it
+does not work from localhost on a phone.
 
 ```bash
-npx vercel login
-npx vercel --prod
+npx vercel --prod          # redeploy
 ```
 
-Installing to a phone home screen needs HTTPS, so it only works from a deployed
-URL, not from localhost on your phone.
+New Vercel projects enable Vercel Authentication, which serves a login page in
+place of every asset — including the manifest and service worker. It is off for
+this project (`vercel project protection handycap` shows the current state, and
+`... disable handycap --sso` / `enable` toggles it).
 
 ## How it is put together
 
