@@ -18,7 +18,7 @@ export function IndexScreen() {
   const [whole, decimal] = record.index.toFixed(1).split('.')
 
   return (
-    <div className="space-y-6 px-4 pb-32 pt-6">
+    <div className="space-y-6 px-4 pb-28 pt-6">
       <section className="rise relative">
         <p className="label flex items-center gap-1.5">
           Handicap Index <Explain term="handicapIndex" />
@@ -84,7 +84,7 @@ function GettingStarted({ posted }: { posted: number }) {
   const progress = posted / MIN_SCORES_FOR_INDEX
 
   return (
-    <div className="rise space-y-6 px-4 pb-32 pt-10">
+    <div className="rise space-y-6 px-4 pb-28 pt-10">
       <div className="flex items-center gap-5">
         <ProgressRing progress={progress} />
         <div>

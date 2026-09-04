@@ -44,6 +44,43 @@
   --amber: #f0b429;
   --flag: #e5674b;
   --shadow-lift: 0 1px 0 rgb(255 255 255 / 0.04), 0 8px 24px rgb(0 0 0 / 0.4);
+
+  /* Diverging scoring ramp, validated against the dark panel surface. */
+  --score-under: #6ee787;
+  --score-par: #6e7d73;
+  --score-bogey: #f5c563;
+  --score-double: #ee7b32;
+  --score-triple: #c9342f;
+}
+
+/*
+  Dark is the default because the app is read outdoors, but a viewer whose
+  system asks for light gets light, and an explicit choice wins over both.
+*/
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme='dark']) {
+  color-scheme: light;
+  --ground: #f2f0e9;
+  --surface: #ffffff;
+  --raised: #fbfaf6;
+  --hairline: #ddd9cc;
+  --hairline-strong: #b9b3a1;
+  --ink: #101710;
+  --ink-dim: #55604f;
+  --ink-faint: #7d8878;
+  --signal: #1c7a3c;
+  --signal-deep: #14562a;
+  --amber: #9a6a05;
+  --flag: #ac3d24;
+  --shadow-lift: 0 1px 2px rgb(16 23 16 / 0.06), 0 8px 24px rgb(16 23 16 / 0.08);
+
+  /* The same ramp re-stepped for a white surface, not an automatic flip. */
+  --score-under: #17773a;
+  --score-par: #7d8878;
+  --score-bogey: #c99b00;
+  --score-double: #ce3b2a;
+  --score-triple: #77140e;
+}
 }
 
 :root[data-theme='light'] {
@@ -61,6 +98,13 @@
   --amber: #9a6a05;
   --flag: #ac3d24;
   --shadow-lift: 0 1px 2px rgb(16 23 16 / 0.06), 0 8px 24px rgb(16 23 16 / 0.08);
+
+  /* The same ramp re-stepped for a white surface, not an automatic flip. */
+  --score-under: #17773a;
+  --score-par: #7d8878;
+  --score-bogey: #c99b00;
+  --score-double: #ce3b2a;
+  --score-triple: #77140e;
 }
 
 * {
