@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'vitest'
-import { handicapIndex, differentialsUsed } from './handicapIndex'
+import {
+  handicapIndex,
+  differentialsUsed,
+  averageOfLowest,
+  MAX_HANDICAP_INDEX,
+} from './handicapIndex'
 
 /** n differentials, all the same value, in chronological order. */
 const flat = (n: number, value: number) => Array.from({ length: n }, () => value)
@@ -101,5 +106,35 @@ describe('handicapIndex', () => {
 
   test('handles plus handicaps', () => {
     expect(handicapIndex(flat(20, -1.4))).toBe(-1.4)
+  })
+})
+
+describe('averageOfLowest', () => {
+  test('averages the lowest N and applies the row adjustment', () => {
+    // Lowest two of these are 10.0 and 20.0, averaging 15.0, less the 1.0
+    // adjustment the six-score row carries.
+    expect(averageOfLowest([10, 20, 30, 40, 50, 60], { count: 2, adjustment: -1.0 })).toBe(14.0)
+  })
+
+  test('rounds the average half away from zero, in whole tenths', () => {
+    // 10.05 sits just below the tie in binary floating point; tenths fix it.
+    expect(averageOfLowest([10.0, 10.1], { count: 2, adjustment: 0 })).toBe(10.1)
+  })
+
+  test('never exceeds the maximum Handicap Index', () => {
+    expect(averageOfLowest([60, 60, 60], { count: 3, adjustment: 0 })).toBe(MAX_HANDICAP_INDEX)
+  })
+
+  test('clamps a count larger than the differentials it is given', () => {
+    // Reachable only from an intermediate state while attributing a change,
+    // never from a real record — but it must not divide by a phantom score.
+    expect(averageOfLowest([10, 20], { count: 8, adjustment: 0 })).toBe(15.0)
+  })
+
+  test('reproduces handicapIndex for an uncapped record', () => {
+    const values = [12.3, 18.7, 9.4, 22.1, 15.0, 11.2, 30.4, 14.8, 19.9]
+    expect(averageOfLowest(values, differentialsUsed(values.length))).toBe(
+      handicapIndex(values),
+    )
   })
 })

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { buildScoringRecord } from './scoringRecord'
+import { buildScoringRecord, activeReduction, reducedValues } from './scoringRecord'
 import { scoresOfBogey, scoresOfPar, testRound, testCourse, testHoles } from '@/test/fixtures'
 
 describe('buildScoringRecord', () => {
@@ -134,5 +134,30 @@ describe('buildScoringRecord', () => {
       testRound({ date: '2026-05-15', strokes: scoresOfBogey() }),
     ])
     expect(record.indexHistory).toEqual([{ date: '2026-05-15', index: 16.0 }])
+  })
+})
+
+describe('Rule 5.9 window helpers', () => {
+  const entry = (value: number, exceptionalScoreReduction = 0) => ({
+    value,
+    exceptionalScoreReduction,
+  })
+
+  test('a window with no exceptional rounds has no active reduction', () => {
+    expect(activeReduction([entry(18), entry(12)])).toBe(0)
+  })
+
+  test('reductions in the window accumulate', () => {
+    expect(activeReduction([entry(18), entry(5, -1.0), entry(2, -2.0)])).toBe(-3.0)
+  })
+
+  test('the reduction shifts every differential in the window equally', () => {
+    // Rule 5.9 moves the whole window, so the average moves by exactly the
+    // same amount — which is why the effect fades as the round rolls out.
+    expect(reducedValues([entry(18), entry(12)], -2.0)).toEqual([16.0, 10.0])
+  })
+
+  test('shifting by zero leaves the values untouched', () => {
+    expect(reducedValues([entry(18.3), entry(12.7)], 0)).toEqual([18.3, 12.7])
   })
 })

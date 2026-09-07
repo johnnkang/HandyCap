@@ -78,21 +78,38 @@ export function handicapIndex(
   const recent = differentials.slice(-SCORING_RECORD_SIZE)
   if (recent.length < MIN_SCORES_FOR_INDEX) return null
 
-  const { count, adjustment } = differentialsUsed(recent.length)
-
-  // Average in whole tenths so a value like 10.05 lands on the right side of
-  // the tie instead of drifting below it in binary floating point.
-  const lowestTenths = recent
-    .map(toTenths)
-    .sort((a, b) => a - b)
-    .slice(0, count)
-  const averageTenths = roundHalfAwayFromZero(
-    lowestTenths.reduce((total, tenths) => total + tenths, 0) / count,
-  )
-
-  let index = Math.min(averageTenths / 10 + adjustment, MAX_HANDICAP_INDEX)
+  let index = averageOfLowest(recent, differentialsUsed(recent.length))
   if (lowHandicapIndex !== null && lowHandicapIndex !== undefined) {
     index = applyCaps(index, lowHandicapIndex)
   }
   return round1(index)
+}
+
+/**
+ * The uncapped index a set of differentials produces under a given Rule 5.2a
+ * row: the average of the lowest `count`, plus the row's adjustment.
+ *
+ * Split out from `handicapIndex` because explaining a change means evaluating a
+ * window under a row it did not select for itself — holding last week's row
+ * against this week's scores is how you learn what the row change alone was
+ * worth.
+ */
+export function averageOfLowest(
+  differentials: number[],
+  { count, adjustment }: DifferentialSelection,
+): number {
+  // Average in whole tenths so a value like 10.05 lands on the right side of
+  // the tie instead of drifting below it in binary floating point.
+  const used = Math.min(count, differentials.length)
+  if (used <= 0) return 0
+
+  const lowestTenths = differentials
+    .map(toTenths)
+    .sort((a, b) => a - b)
+    .slice(0, used)
+  const averageTenths = roundHalfAwayFromZero(
+    lowestTenths.reduce((total, tenths) => total + tenths, 0) / used,
+  )
+
+  return Math.min(averageTenths / 10 + adjustment, MAX_HANDICAP_INDEX)
 }

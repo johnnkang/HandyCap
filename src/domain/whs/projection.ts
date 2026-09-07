@@ -3,7 +3,13 @@ import { round1, roundHalfAwayFromZero } from './rounding'
 import { NEUTRAL_SLOPE } from './differential'
 import { exceptionalScoreReduction } from './exceptionalScore'
 import type { RatedTee } from './courseHandicap'
-import type { PostedDifferential, ScoringRecord } from './scoringRecord'
+import {
+  activeReduction,
+  reducedValues,
+  type PostedDifferential,
+  type ScoringRecord,
+  type WindowEntry,
+} from './scoringRecord'
 
 /** How many future rounds `roundsToReachTarget` will look ahead before giving up. */
 const PROJECTION_HORIZON = 40
@@ -27,21 +33,13 @@ export function scoreForDifferential(differential: number, tee: RatedTee): numbe
  * reductions still active within it. Mirrors what `buildScoringRecord` does, so
  * a projection and a real post agree.
  */
-function indexFromWindow(
-  window: Pick<PostedDifferential, 'value' | 'exceptionalScoreReduction'>[],
-  low: number | null,
-): number | null {
-  const activeReduction = window.reduce(
-    (total, differential) => total + differential.exceptionalScoreReduction,
-    0,
-  )
-  const values = window.map((differential) => round1(differential.value + activeReduction))
-  return handicapIndex(values, low)
+function indexFromWindow(window: WindowEntry[], low: number | null): number | null {
+  return handicapIndex(reducedValues(window, activeReduction(window)), low)
 }
 
 /** The 20-score window after one more round at `differential`. */
 function appendCandidate(
-  existing: Pick<PostedDifferential, 'value' | 'exceptionalScoreReduction'>[],
+  existing: WindowEntry[],
   differential: number,
   currentIndex: number | null,
 ) {
@@ -100,8 +98,7 @@ export function trajectory(
   assumedDifferential: number,
   roundsAhead: number,
 ): TrajectoryPoint[] {
-  let window: Pick<PostedDifferential, 'value' | 'exceptionalScoreReduction'>[] =
-    record.differentials
+  let window: WindowEntry[] = record.differentials
   let index = record.index
   const path: TrajectoryPoint[] = []
 

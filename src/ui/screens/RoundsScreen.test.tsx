@@ -89,3 +89,21 @@ describe('RoundsScreen', () => {
     expect(await screen.findByRole('dialog')).toBeInTheDocument()
   })
 })
+
+describe('what a round is worth', () => {
+  const totals = (values: number[]): Round[] =>
+    values.map((totalStrokes, i) =>
+      testRound({ id: `t${i}`, date: `2026-0${i + 1}-01`, totalStrokes }),
+    )
+
+  test('a round detail says what the index would be without it', async () => {
+    // The question behind every scorecard: is this round helping me?
+    const user = userEvent.setup()
+    await renderWithState(<RoundsScreen />, { rounds: totals([90, 90, 90, 80, 88]) })
+
+    const list = await screen.findByRole('list')
+    await user.click(within(list).getAllByRole('button')[0]!)
+
+    expect(await screen.findByText(/without this round/i)).toBeInTheDocument()
+  })
+})

@@ -1,12 +1,17 @@
+import { useMemo } from 'react'
 import { useAppState } from '../state/AppState'
 import { Explain } from './Explain'
 import { maxHoleScore } from '@/domain/whs/netDoubleBogey'
+import { explainRoundPosted } from '@/domain/whs/retrospective'
 import type { RoundView } from '@/domain/stats/roundViews'
 
 /** The full card for one round, including how its differential was arrived at. */
 export function RoundDetail({ view, onClose }: { view: RoundView; onClose: () => void }) {
-  const { deleteRound, record } = useAppState()
+  const { deleteRound, record, rounds } = useAppState()
   const { round } = view
+
+  /** What the record looks like without this round — is it helping or not? */
+  const worth = useMemo(() => explainRoundPosted(rounds, round.id), [rounds, round.id])
   const posted = record.differentials.find(
     (differential) => differential.roundId === round.id,
   )
@@ -122,6 +127,36 @@ export function RoundDetail({ view, onClose }: { view: RoundView; onClose: () =>
               <span className="label">Score Differential</span>
               <span className="numeral text-2xl">{posted.value.toFixed(1)}</span>
             </div>
+          </div>
+        )}
+
+        {record.index !== null && (
+          <div className="panel space-y-1 p-4">
+            <p className="label">What this round is worth</p>
+            <p className="prose-note">
+              {worth.movement.before === null ? (
+                <>
+                  Without this round you would not have a Handicap Index at all — it is one
+                  of the three the Rules need.
+                </>
+              ) : worth.movement.strokes === 0 ? (
+                <>
+                  Without this round your Index would be the same{' '}
+                  {worth.movement.before.toFixed(1)}. It is in your record but not among the
+                  scores your Index is drawn from. <Explain term="countingRounds" />
+                </>
+              ) : (
+                <>
+                  Without this round your Index would be{' '}
+                  <strong style={{ color: 'var(--ink)' }}>
+                    {worth.movement.before.toFixed(1)}
+                  </strong>{' '}
+                  instead of {worth.movement.after?.toFixed(1)}, so it is worth{' '}
+                  {Math.abs(worth.movement.strokes ?? 0).toFixed(1)} strokes{' '}
+                  {(worth.movement.strokes ?? 0) < 0 ? 'off' : 'on'} your Index.
+                </>
+              )}
+            </p>
           </div>
         )}
 

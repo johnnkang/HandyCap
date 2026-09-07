@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { screen } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { IndexScreen } from './IndexScreen'
 import { renderWithState } from '@/test/ui'
 import { createRepository } from '@/data/repo/repository'
@@ -87,5 +88,38 @@ describe('IndexScreen', () => {
 
     expect(await screen.findByText(/loading your record/i)).toBeInTheDocument()
     expect(screen.queryByText(/more round/i)).not.toBeInTheDocument()
+  })
+})
+
+describe('explaining the last change', () => {
+  /** Totals on the neutral tee, where the differential is exactly total - 72. */
+  const totals = (values: number[]): Round[] =>
+    values.map((totalStrokes, i) =>
+      testRound({ id: `t${i}`, date: `2026-0${i + 1}-01`, totalStrokes }),
+    )
+
+  test('explains what the most recent round did to the index', async () => {
+    await renderWithState(<IndexScreen />, { rounds: totals([90, 90, 90, 80]) })
+
+    expect(await screen.findByText(/your index fell/i)).toBeInTheDocument()
+  })
+
+  test('says nothing to explain when the index has only just arrived', async () => {
+    // A first index is an arrival, not a movement — there is no "before".
+    await renderWithState(<IndexScreen />, { rounds: totals([90, 90, 90]) })
+
+    await screen.findByText('16')
+    expect(screen.queryByText(/your index fell/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/your index rose/i)).not.toBeInTheDocument()
+  })
+
+  test('opens a browsable history of every movement', async () => {
+    const user = userEvent.setup()
+    await renderWithState(<IndexScreen />, { rounds: totals([90, 90, 90, 80, 88]) })
+
+    await user.click(await screen.findByRole('button', { name: /how your index has moved/i }))
+
+    const history = await screen.findByRole('dialog', { name: /index history/i })
+    expect(history).toBeInTheDocument()
   })
 })

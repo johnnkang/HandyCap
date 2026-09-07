@@ -42,6 +42,29 @@ export interface PendingNine {
 
 export type CapStatus = 'none' | 'soft' | 'hard'
 
+/** The parts of a posted differential the Rule 5.9 arithmetic needs. */
+export type WindowEntry = Pick<PostedDifferential, 'value' | 'exceptionalScoreReduction'>
+
+/**
+ * Rule 5.9: the total reduction currently active across a window.
+ *
+ * Reductions live on the differentials that earned them, so they leave the
+ * record on their own as those rounds age out.
+ */
+export function activeReduction(window: WindowEntry[]): number {
+  return window.reduce((total, entry) => total + entry.exceptionalScoreReduction, 0)
+}
+
+/**
+ * A window's differentials shifted by an active Rule 5.9 reduction.
+ *
+ * Reducing every value by the same amount moves the average by that amount,
+ * which is exactly what the Rule intends.
+ */
+export function reducedValues(window: WindowEntry[], reduction: number): number[] {
+  return window.map((entry) => round1(entry.value + reduction))
+}
+
 export interface ScoringRecord {
   /** The current Handicap Index, or null below three scores. */
   index: number | null
@@ -126,14 +149,7 @@ export function buildScoringRecord(rounds: Round[]): ScoringRecord {
   const recomputeIndex = (asOf: string) => {
     const window = differentials.slice(-SCORING_RECORD_SIZE)
 
-    // Rule 5.9 reduces each differential in the window, which shifts the
-    // average by exactly the same amount. The effect fades on its own as the
-    // exceptional round rolls out of the window.
-    const activeReduction = window.reduce(
-      (total, differential) => total + differential.exceptionalScoreReduction,
-      0,
-    )
-    const values = window.map((differential) => round1(differential.value + activeReduction))
+    const values = reducedValues(window, activeReduction(window))
 
     // The Low Handicap Index, and therefore the caps, only exist once the
     // record is full (Rule 5.7).

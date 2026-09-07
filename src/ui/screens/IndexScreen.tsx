@@ -1,11 +1,26 @@
+import { useMemo, useState } from 'react'
 import { MIN_SCORES_FOR_INDEX } from '@/domain/whs/handicapIndex'
+import { explainRoundPosted } from '@/domain/whs/retrospective'
 import { RecordStrip } from '../components/RecordStrip'
 import { CourseHandicapCard } from '../components/CourseHandicapCard'
 import { Explain } from '../components/Explain'
+import { IndexChangeCard } from '../components/IndexChangeCard'
+import { MovementTimeline } from '../components/MovementTimeline'
 import { useAppState } from '../state/AppState'
 
 export function IndexScreen() {
-  const { record, loading } = useAppState()
+  const { record, rounds, loading } = useAppState()
+  const [showHistory, setShowHistory] = useState(false)
+
+  /**
+   * What the most recent round did. Removing the newest round from the record
+   * is the same comparison the timeline makes for its last entry, at a fraction
+   * of the cost.
+   */
+  const lastChange = useMemo(() => {
+    const latest = [...rounds].sort((a, b) => b.date.localeCompare(a.date))[0]
+    return latest ? explainRoundPosted(rounds, latest.id) : null
+  }, [rounds])
 
   if (loading) {
     return <p className="label px-4 pt-8">Loading your record…</p>
@@ -31,9 +46,32 @@ export function IndexScreen() {
         </p>
       </section>
 
+      {/*
+        Only when there is something to attribute. A retrospective with no
+        causes means nothing moved, and the pending-nine case below already
+        says so in its own words.
+      */}
+      {lastChange && lastChange.causes.length > 0 && (
+        <div className="rise" style={{ animationDelay: '40ms' }}>
+          <IndexChangeCard retrospective={lastChange} />
+        </div>
+      )}
+
       <section className="rise panel p-4" style={{ animationDelay: '60ms' }}>
         <RecordStrip record={record} />
+        <button
+          type="button"
+          onClick={() => setShowHistory(true)}
+          className="label tap hairline-top mt-3 flex w-full items-center justify-between pt-3"
+        >
+          <span>See how your Index has moved</span>
+          <span aria-hidden="true" style={{ color: 'var(--signal)' }}>
+            →
+          </span>
+        </button>
       </section>
+
+      {showHistory && <MovementTimeline onClose={() => setShowHistory(false)} />}
 
       {record.cap !== 'none' && (
         <section

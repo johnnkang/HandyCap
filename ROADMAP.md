@@ -28,6 +28,21 @@ deliberate approximations described under "Known limits".
 
 ## Done since
 
+- **The retrospective engine.** HandyCap now answers "why did my Handicap Index
+  change?" — the most-asked question in golf, and one no competitor app answers.
+  Every movement is attributed to its actual causes with a stroke value each: a
+  round entering, a good round ageing out, the Rule 5.2a row changing, a cap
+  biting, a Rule 5.9 reduction fading, or a backdated round silently re-deriving
+  a score posted months ago. The parts sum to the whole exactly, which a seeded
+  property test pins across 400 random records.
+
+  It shows on the Index screen after posting, in a browsable history of every
+  movement, and inside each round as "what this round is worth". The engine
+  compares two scoring records rather than watching one being built, because
+  only that can describe a deletion or an import — and because a backdated round
+  changes the Course Handicap held at later rounds, which silently rewrites
+  their differentials.
+
 - **Vercel now auto-deploys.** Connected to `johnnkang/HandyCap` on 2026-09-07,
   production branch `main`, verified against the Vercel API. The earlier
   `vercel git connect` failures were the Vercel GitHub App not being installed
