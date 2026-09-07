@@ -1,0 +1,29 @@
+{
+  "_comment": "Copy to ghin-data.json (gitignored) and fill in from your GHIN score history. Scores from GHIN are already adjusted gross, so leave hole detail out.",
+  "officialIndex": 14.2,
+  "asOf": "2026-09-07",
+  "rounds": [
+    {
+      "date": "2026-08-30",
+      "course": "Rancho Park",
+      "tee": "Blue",
+      "score": 92,
+      "courseRating": 71.6,
+      "slope": 123,
+      "par": 71,
+      "holes": 18,
+      "ghinDifferential": 18.7
+    },
+    {
+      "date": "2026-08-16",
+      "course": "Rancho Park",
+      "tee": "White",
+      "score": 45,
+      "courseRating": 69.4,
+      "slope": 118,
+      "par": 71,
+      "holes": 9,
+      "nine": "front"
+    }
+  ]
+}

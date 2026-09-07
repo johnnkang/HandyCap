@@ -12,11 +12,19 @@ best and worst, and the Par 3/4/5 strengths analysis.
 
 ## Pick up here
 
-**1. Check it against a real GHIN index.** This is the most valuable thing left
-and the one thing the test suite cannot do. The numbers match hand calculation
-and the published rules, but no round has been compared against an official
-handicap. Post your last 20 rounds and compare — a gap would tell us something
-155 tests cannot.
+**1. Check it against a real GHIN index.** Still the most valuable thing left and
+the one thing the test suite cannot do — every other test asserts the engine
+matches *our reading* of the Rules, not that our reading is right.
+
+Waiting on a GHIN account. The harness is already built, so this becomes a
+paste-and-run job the moment one exists: fill in `ghin-data.json` at the project
+root (gitignored; copy `ghin-data.example.json` for the shape) and `npm test`
+reconciles it. It checks per-round Score Differentials and the final index
+separately, which distinguishes an arithmetic bug from a bug in selecting and
+averaging the lowest 8. Without that file the suite skips it entirely.
+
+Expect some divergence that is not a bug: PCC days and any lone nine are the two
+deliberate approximations described under "Known limits".
 
 ## Done since
 
