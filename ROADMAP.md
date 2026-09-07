@@ -1,6 +1,6 @@
 # Where HandyCap stands
 
-Last updated 2026-09-04, end of the first build session.
+Last updated 2026-09-07.
 
 All three planned phases are complete, deployed, and green: **155 tests**,
 typecheck clean, production build passing. Live at
@@ -12,18 +12,22 @@ best and worst, and the Par 3/4/5 strengths analysis.
 
 ## Pick up here
 
-**1. Merge the branch.** `phase-2-history-insights-forecast` holds three commits
-and is pushed, but `main` still only has Phase 1. The PR has not been created.
-
-**2. Check it against a real GHIN index.** This is the most valuable thing left
+**1. Check it against a real GHIN index.** This is the most valuable thing left
 and the one thing the test suite cannot do. The numbers match hand calculation
 and the published rules, but no round has been compared against an official
 handicap. Post your last 20 rounds and compare — a gap would tell us something
 155 tests cannot.
 
-**3. Connect Vercel to GitHub** so pushes deploy automatically. `vercel link`
+**2. Connect Vercel to GitHub** so pushes deploy automatically. `vercel link`
 tried and failed because the Vercel GitHub app is not installed; `vercel git
 connect` would finish it. Until then, deploy with `npx vercel --prod`.
+
+## Done since
+
+- **Merged.** `phase-2-history-insights-forecast` fast-forwarded into `main` on
+  2026-09-07 and pushed; the branch is deleted locally and on the remote. `main`
+  is now the deployed, tested state. Verified green after the merge: 155 tests,
+  typecheck clean.
 
 ## Deliberately deferred
 
