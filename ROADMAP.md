@@ -34,6 +34,10 @@ deliberate approximations described under "Known limits".
   for the `johnnkangs-projects` team; installing it from the Vercel dashboard
   fixed it and the CLI then reported the repo already connected. Pushes to `main`
   deploy on their own — `npx vercel --prod` is no longer needed.
+- **UI component tests.** The app state, index screen, rounds screen, posting
+  flow, record strip and explanation disclosures are covered — 196 tests, up
+  from 155. The posting tests were mutation-checked: breaking the save and
+  skewing the differential preview each failed exactly one test.
 - **GitHub MCP works.** A fine-grained PAT in `~/.claude/settings.json` plus a
   full Claude Code restart; the tools authenticate as `johnnkang`.
 - **Merged.** `phase-2-history-insights-forecast` fast-forwarded into `main` on
@@ -51,9 +55,11 @@ Decided against for the first version, not forgotten:
 
 ## Known limits
 
-- UI screens are verified by driving the real app rather than by component tests.
-  Only the scorecard and the chart layout have their own tests; the domain and
-  data layers are thoroughly test-driven.
+- The remaining untested UI is the presentational end: the About, Insights and
+  Forecast screens, the charts, and the manual course form. The index and
+  posting flows, the scoring record strip, the explanations and app state now
+  have component tests; the domain and data layers remain thoroughly
+  test-driven.
 - PCC is treated as zero and nine-hole rounds are paired. Both are deliberate and
   explained in the README and in the app's About sheet.
 - Not an official handicap. HandyCap is not a licensed provider.
