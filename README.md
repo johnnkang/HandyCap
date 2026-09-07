@@ -29,8 +29,11 @@ behaviour with `npm run preview`, not `npm run dev`.
 Open it on a phone and use Add to Home Screen; installing needs HTTPS, so it
 does not work from localhost on a phone.
 
+Pushing to `main` deploys automatically — the repo is connected to the Vercel
+project, with `main` as the production branch.
+
 ```bash
-npx vercel --prod          # redeploy
+npx vercel --prod          # force a deploy without pushing
 ```
 
 New Vercel projects enable Vercel Authentication, which serves a login page in

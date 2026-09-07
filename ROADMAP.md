@@ -18,12 +18,16 @@ and the published rules, but no round has been compared against an official
 handicap. Post your last 20 rounds and compare — a gap would tell us something
 155 tests cannot.
 
-**2. Connect Vercel to GitHub** so pushes deploy automatically. `vercel link`
-tried and failed because the Vercel GitHub app is not installed; `vercel git
-connect` would finish it. Until then, deploy with `npx vercel --prod`.
-
 ## Done since
 
+- **Vercel now auto-deploys.** Connected to `johnnkang/HandyCap` on 2026-09-07,
+  production branch `main`, verified against the Vercel API. The earlier
+  `vercel git connect` failures were the Vercel GitHub App not being installed
+  for the `johnnkangs-projects` team; installing it from the Vercel dashboard
+  fixed it and the CLI then reported the repo already connected. Pushes to `main`
+  deploy on their own — `npx vercel --prod` is no longer needed.
+- **GitHub MCP works.** A fine-grained PAT in `~/.claude/settings.json` plus a
+  full Claude Code restart; the tools authenticate as `johnnkang`.
 - **Merged.** `phase-2-history-insights-forecast` fast-forwarded into `main` on
   2026-09-07 and pushed; the branch is deleted locally and on the remote. `main`
   is now the deployed, tested state. Verified green after the merge: 155 tests,
