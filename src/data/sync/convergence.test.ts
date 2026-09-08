@@ -42,19 +42,21 @@ describe('two devices sharing one account', () => {
     expect(await ids(tablet.repo)).toEqual(['a'])
   })
 
-  test('offline edits on both devices converge, in either sync order', async () => {
+  test.each([
+    ['the phone reaches the network first', false],
+    ['the tablet reaches the network first', true],
+  ])('offline edits on both devices converge when %s', async (_name, tabletFirst) => {
     const remote = createMemoryRemote()
-    const clockA = { at: '2026-05-02T00:00:00.000Z' }
-    const clockB = { at: '2026-05-03T00:00:00.000Z' }
-    const phone = device(clockA)
-    const tablet = device(clockB)
+    const phone = device({ at: '2026-05-02T00:00:00.000Z' })
+    const tablet = device({ at: '2026-05-03T00:00:00.000Z' })
 
     await phone.repo.saveRound(testRound({ id: 'a', date: '2026-05-01', totalStrokes: 90 }))
     await tablet.repo.saveRound(testRound({ id: 'b', date: '2026-05-02', totalStrokes: 85 }))
 
-    await phone.sync(remote)
-    await tablet.sync(remote)
-    await phone.sync(remote)
+    // Running both orders is the point: convergence that only holds when one
+    // particular device syncs first is not convergence.
+    const order = tabletFirst ? [tablet, phone, tablet] : [phone, tablet, phone]
+    for (const next of order) await next.sync(remote)
 
     expect(await ids(phone.repo)).toEqual(['a', 'b'])
     expect(await ids(tablet.repo)).toEqual(['a', 'b'])
@@ -97,8 +99,8 @@ describe('two devices sharing one account', () => {
     await phone.sync(remote)
     await tablet.sync(remote)
 
-    // A round from months ago, entered late. It must land in date order, which
-    // is what lets each device replay and re-derive its own differentials.
+    // A round from months ago, entered late. It has to reach the other device
+    // and land in date order — the order each device replays its record in.
     clockA.at = '2026-05-11T00:00:00.000Z'
     await phone.repo.saveRound(testRound({ id: 'old', date: '2026-01-04', totalStrokes: 95 }))
     await phone.sync(remote)
