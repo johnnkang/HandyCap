@@ -1581,7 +1581,11 @@ Create `supabase/schema.sql`:
 create table if not exists public.rounds (
   user_id    uuid not null references auth.users (id) on delete cascade,
   round_id   text not null,
-  payload    jsonb,
+  -- json, not jsonb: jsonb normalises and reorders keys, which would change
+  -- the serialised payload the client fingerprints its pushes with, making
+  -- every pulled row look new and re-pushing the whole record every sync.
+  -- Nothing ever queries inside the payload, so jsonb buys nothing here.
+  payload    json,
   updated_at text not null,
   deleted_at text,
   -- Server-assigned, monotonic in commit order, and the ONLY thing the client's
