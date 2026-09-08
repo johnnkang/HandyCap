@@ -775,6 +775,20 @@ describe('syncOnce', () => {
     expect(second.pushed).toBe(1)
     expect((await remote.pull(undefined)).map((row) => row.roundId).sort()).toEqual(['a', 'b'])
   })
+
+  test('the merge winner reaches the server even when both sides tie on a stamp', async () => {
+    const tie = '2026-05-01T00:00:00.000Z'
+    // Same round, same instant, different score. The merge breaks the tie on
+    // content; whichever it picks has to end up on the server, or the two
+    // devices disagree permanently.
+    const remote = createMemoryRemote(toRows(withRound('a', '2026-05-01', tie, 84)))
+    const local = withRound('a', '2026-05-01', tie, 90)
+
+    const outcome = await syncOnce(local, remote, {})
+
+    const [row] = await remote.pull(undefined)
+    expect(row!.payload!.totalStrokes).toBe(outcome.state.rounds[0]!.round.totalStrokes)
+  })
 })
 ```
 
@@ -907,7 +921,7 @@ Create `src/data/sync/engine.ts`:
 
 ```ts
 import { mergeStates } from './merge'
-import { rowStamp, toRows, toSyncState, type RemoteStore } from './remote'
+import { rowStamp, toRows, toSyncState, type OutgoingRound, type RemoteStore } from './remote'
 import type { SyncState } from './types'
 
 /**
@@ -925,10 +939,12 @@ export interface SyncCursors {
    */
   lastPulledCursor?: string
   /**
-   * roundId -> the stamp this device last got onto the server. Exact, so a
-   * round stamped earlier than a previous push (a corrected clock, a round
-   * entered late) still uploads instead of falling under a high-water mark
-   * forever. Bounded by the number of rounds, which is tens.
+   * roundId -> a fingerprint of the version this device last got onto the
+   * server. Per round and content-aware, so a round stamped earlier than a
+   * previous push still uploads instead of falling under a high-water mark
+   * forever, and a merge winner sharing its loser's timestamp is not mistaken
+   * for something the server already has. Bounded by the number of rounds,
+   * which is tens.
    */
   pushed?: Record<string, string>
 }
@@ -942,6 +958,31 @@ export interface SyncOutcome {
 
 const highest = (values: string[], fallback?: string): string | undefined =>
   values.reduce<string | undefined>((held, value) => (!held || value > held ? value : held), fallback)
+
+/**
+ * A fingerprint of what a row actually says, used to decide whether the server
+ * already holds this version.
+ *
+ * The stamp alone is not enough. When two devices write the same round in the
+ * same millisecond, `mergeStates` picks a winner by comparing content — but the
+ * winner keeps the shared timestamp, so a stamp-only check would conclude the
+ * server already had it and never push the winner. The two devices would then
+ * disagree forever, which is exactly the divergence the merge exists to prevent.
+ *
+ * FNV-1a, 32-bit, and deliberately not cryptographic: it only has to tell two
+ * versions of one round apart, and a collision merely skips a push that a later
+ * edit would send anyway. Hashing rather than storing the content keeps the
+ * persisted cursor small.
+ */
+const fingerprint = (row: OutgoingRound): string => {
+  const source = `${rowStamp(row)}|${row.deletedAt ? 'deleted' : JSON.stringify(row.payload)}`
+  let hash = 0x811c9dc5
+  for (let i = 0; i < source.length; i += 1) {
+    hash ^= source.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(16)
+}
 
 /**
  * One round of sync: pull the delta, merge, hand back the result to persist,
@@ -961,13 +1002,14 @@ export async function syncOnce(
   const merged = mergeStates(local, toSyncState(pulled))
 
   // Everything the server is known to hold, per round: what it just handed us,
-  // on top of what this device has already put there.
+  // on top of what this device has already put there. Keyed by content, so a
+  // merge winner that shares its loser's timestamp is still recognised as new.
   const onServer: Record<string, string> = { ...cursors.pushed }
-  for (const row of pulled) onServer[row.roundId] = rowStamp(row)
+  for (const row of pulled) onServer[row.roundId] = fingerprint(row)
 
-  const outgoing = toRows(merged).filter((row) => onServer[row.roundId] !== rowStamp(row))
+  const outgoing = toRows(merged).filter((row) => onServer[row.roundId] !== fingerprint(row))
   if (outgoing.length > 0) await remote.push(outgoing)
-  for (const row of outgoing) onServer[row.roundId] = rowStamp(row)
+  for (const row of outgoing) onServer[row.roundId] = fingerprint(row)
 
   return {
     state: merged,
