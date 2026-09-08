@@ -81,18 +81,40 @@ describe('merge convergence', () => {
     }
   })
 
-  test('never drops a round without a tombstone to explain it', () => {
+  test('agrees with an independently computed winner for every id', () => {
     const rand = seeded(4)
     for (let i = 0; i < 400; i++) {
       const a = randomState(rand)
       const b = randomState(rand)
       const merged = mergeStates(a, b)
-      const surviving = new Set(merged.rounds.map((r) => r.round.id))
-      const deleted = new Set(merged.tombstones.map((t) => t.id))
+
+      // The expected outcome, derived from the rules rather than from the
+      // merge: the newest claim for an id wins, and a deletion takes a tie.
+      const newestWrite = new Map<string, string>()
+      const newestDelete = new Map<string, string>()
       for (const side of [a, b]) {
-        for (const { round } of side.rounds) {
-          expect(surviving.has(round.id) || deleted.has(round.id)).toBe(true)
+        for (const { round, updatedAt } of side.rounds) {
+          const held = newestWrite.get(round.id)
+          if (!held || updatedAt > held) newestWrite.set(round.id, updatedAt)
         }
+        for (const { id, deletedAt } of side.tombstones) {
+          const held = newestDelete.get(id)
+          if (!held || deletedAt > held) newestDelete.set(id, deletedAt)
+        }
+      }
+
+      const survived = new Map(merged.rounds.map((r) => [r.round.id, r.updatedAt]))
+      const deleted = new Map(merged.tombstones.map((t) => [t.id, t.deletedAt]))
+
+      for (const id of new Set([...newestWrite.keys(), ...newestDelete.keys()])) {
+        const write = newestWrite.get(id)
+        const remove = newestDelete.get(id)
+        const isDeleted = remove !== undefined && (write === undefined || remove >= write)
+
+        expect(deleted.has(id)).toBe(isDeleted)
+        expect(survived.has(id)).toBe(!isDeleted)
+        if (isDeleted) expect(deleted.get(id)).toBe(remove)
+        else expect(survived.get(id)).toBe(write)
       }
     }
   })
