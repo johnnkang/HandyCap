@@ -710,14 +710,70 @@ describe('syncOnce', () => {
     expect(outcome.pushed).toBe(0)
   })
 
-  test('a second sync with no changes does nothing', async () => {
+  test('an idle device settles into pulling and pushing nothing', async () => {
     const remote = createMemoryRemote()
     const local = withRound('a', '2026-05-01', '2026-05-01T00:00:00.000Z')
+
     const first = await syncOnce(local, remote, {})
+    expect(first.pushed).toBe(1)
+
+    // The first sync pulled nothing, so its cursor is still unset and this one
+    // is handed back the row it wrote. It must not push it a second time.
     const second = await syncOnce(first.state, remote, first.cursors)
     expect(second.pushed).toBe(0)
-    expect(second.pulled).toBe(0)
     expect(second.state).toEqual(first.state)
+
+    // The cursor has advanced now, so the device is fully idle.
+    const third = await syncOnce(second.state, remote, second.cursors)
+    expect(third.pulled).toBe(0)
+    expect(third.pushed).toBe(0)
+    expect(third.state).toEqual(first.state)
+  })
+
+  test('a device with a fast clock can still see other devices', async () => {
+    const remote = createMemoryRemote()
+
+    // This device's clock is years ahead.
+    const skewed = withRound('mine', '2026-05-01', '2030-01-01T00:00:00.000Z')
+    let cursors = (await syncOnce(skewed, remote, {})).cursors
+    cursors = (await syncOnce(skewed, remote, cursors)).cursors
+
+    // Another device, clock correct, posts a round.
+    await remote.push(toRows(withRound('theirs', '2026-05-02', '2026-09-08T00:00:00.000Z')))
+
+    // A cursor built from client timestamps would sit at 2030 and filter this
+    // row out forever. A server-assigned cursor cannot.
+    const outcome = await syncOnce(skewed, remote, cursors)
+    expect(outcome.state.rounds.map((entry) => entry.round.id).sort()).toEqual([
+      'mine',
+      'theirs',
+    ])
+  })
+
+  test('a round stamped earlier than an earlier push still uploads', async () => {
+    const remote = createMemoryRemote()
+    const first = await syncOnce(
+      withRound('a', '2026-05-01', '2026-06-01T00:00:00.000Z'),
+      remote,
+      {},
+    )
+
+    // A second round carrying an earlier stamp — a corrected clock, or a round
+    // entered late. A single high-water mark would drop it permanently.
+    const local: SyncState = {
+      rounds: [
+        ...first.state.rounds,
+        {
+          round: testRound({ id: 'b', date: '2026-04-01', totalStrokes: 88 }),
+          updatedAt: '2026-05-15T00:00:00.000Z',
+        },
+      ],
+      tombstones: [],
+    }
+
+    const second = await syncOnce(local, remote, first.cursors)
+    expect(second.pushed).toBe(1)
+    expect((await remote.pull(undefined)).map((row) => row.roundId).sort()).toEqual(['a', 'b'])
   })
 })
 ```
@@ -748,23 +804,44 @@ export interface RemoteRound {
   payload: Round | null
   updatedAt: string
   deletedAt: string | null
+  /**
+   * Server-assigned, monotonically increasing in commit order.
+   *
+   * This is the ONLY value the pull cursor may advance on. `updatedAt` comes
+   * from the writing device's clock, so a device running fast would push its
+   * cursor past rows other devices had not yet written and never see them
+   * again. Ordering for transfer is the server's job; ordering for conflict
+   * resolution is what `updatedAt` is for. Keeping them separate is what makes
+   * a wrong device clock merely unfair rather than data-hiding.
+   */
+  cursor: string
 }
+
+/** A row as a client offers it: the server assigns the cursor. */
+export type OutgoingRound = Omit<RemoteRound, 'cursor'>
 
 export interface RemoteStore {
   /**
-   * Rows changed strictly after `since`; every row when `since` is undefined.
+   * Rows with a cursor strictly after `since`; every row when `since` is
+   * undefined.
    *
    * This returns a DELTA. A round absent from the result is unchanged, never
    * deleted — reading absence as deletion would destroy the user's history.
    */
   pull(since: string | undefined): Promise<RemoteRound[]>
-  push(rows: RemoteRound[]): Promise<void>
+  push(rows: OutgoingRound[]): Promise<void>
   /** Remove every row for this account. Used by account deletion. */
   deleteEverything(): Promise<void>
 }
 
-/** The timestamp a row is ordered by, whichever kind it is. */
-export const rowStamp = (row: RemoteRound): string => row.deletedAt ?? row.updatedAt
+/**
+ * The timestamp a row is ordered by, whichever kind it is.
+ *
+ * Takes only the two fields it reads, so it accepts an `OutgoingRound` — which
+ * has no cursor yet — as readily as a stored `RemoteRound`.
+ */
+export const rowStamp = (row: Pick<RemoteRound, 'updatedAt' | 'deletedAt'>): string =>
+  row.deletedAt ?? row.updatedAt
 
 export function toSyncState(rows: RemoteRound[]): SyncState {
   const state = emptySyncState()
@@ -775,7 +852,7 @@ export function toSyncState(rows: RemoteRound[]): SyncState {
   return state
 }
 
-export function toRows(state: SyncState): RemoteRound[] {
+export function toRows(state: SyncState): OutgoingRound[] {
   return [
     ...state.rounds.map((entry) => ({
       roundId: entry.round.id,
@@ -793,20 +870,31 @@ export function toRows(state: SyncState): RemoteRound[] {
 }
 
 /** In-memory `RemoteStore`, so the engine is tested without a network. */
-export function createMemoryRemote(seed: RemoteRound[] = []): RemoteStore {
-  const rows = new Map<string, RemoteRound>(seed.map((row) => [row.roundId, row]))
+export function createMemoryRemote(seed: OutgoingRound[] = []): RemoteStore {
+  const rows = new Map<string, RemoteRound>()
+  let sequence = 0
+
+  const write = (row: OutgoingRound) => {
+    // Zero-padded so cursors compare lexicographically, matching how the real
+    // server hands them out.
+    sequence += 1
+    rows.set(row.roundId, { ...row, cursor: String(sequence).padStart(12, '0') })
+  }
+  for (const row of seed) write(row)
+
   return {
     async pull(since) {
-      const all = [...rows.values()]
-      const changed = since ? all.filter((row) => rowStamp(row) > since) : all
-      return changed
+      return [...rows.values()]
+        .filter((row) => !since || row.cursor > since)
+        .sort((a, b) => a.cursor.localeCompare(b.cursor))
         .map((row) => ({ ...row }))
-        .sort((a, b) => rowStamp(a).localeCompare(rowStamp(b)))
     },
     async push(incoming) {
-      for (const row of incoming) rows.set(row.roundId, { ...row })
+      for (const row of incoming) write(row)
     },
     async deleteEverything() {
+      // The sequence deliberately keeps climbing: reusing a cursor would hide
+      // new rows from a device that had already seen the old one.
       rows.clear()
     },
   }
@@ -825,12 +913,24 @@ import type { SyncState } from './types'
 /**
  * Where this device got to.
  *
- * Both cursors are derived from row timestamps rather than the local clock, so
- * a wrong device clock cannot make the device skip rows it has never seen.
+ * Two different mechanisms deliberately, because they answer two different
+ * questions and only one of them can trust a client clock.
  */
 export interface SyncCursors {
-  lastPulledAt?: string
-  lastPushedAt?: string
+  /**
+   * High-water mark over server-assigned cursors. Advances ONLY on an actual
+   * pull — never from rows this device pushed, because a device whose clock
+   * runs fast would otherwise carry its cursor past rows other devices had not
+   * written yet, and never be given them again.
+   */
+  lastPulledCursor?: string
+  /**
+   * roundId -> the stamp this device last got onto the server. Exact, so a
+   * round stamped earlier than a previous push (a corrected clock, a round
+   * entered late) still uploads instead of falling under a high-water mark
+   * forever. Bounded by the number of rounds, which is tens.
+   */
+  pushed?: Record<string, string>
 }
 
 export interface SyncOutcome {
@@ -848,42 +948,35 @@ const highest = (values: string[], fallback?: string): string | undefined =>
  * and push anything the server has not seen.
  *
  * There is no offline write queue, because the merge is idempotent — a failed
- * sync is simply a sync that has not happened yet.
+ * sync is simply a sync that has not happened yet. There is no clock either:
+ * every cursor comes from the data, so a wrong device clock cannot make this
+ * device skip rows it has never seen.
  */
 export async function syncOnce(
   local: SyncState,
   remote: RemoteStore,
   cursors: SyncCursors,
 ): Promise<SyncOutcome> {
-  const pulled = await remote.pull(cursors.lastPulledAt)
+  const pulled = await remote.pull(cursors.lastPulledCursor)
   const merged = mergeStates(local, toSyncState(pulled))
 
-  // Rows we have just received are already on the server; pushing them back is
-  // harmless but wasteful, so they are skipped by identity.
-  const justPulled = new Set(pulled.map((row) => `${row.roundId}@${rowStamp(row)}`))
-  const outgoing = toRows(merged).filter((row) => {
-    const stamp = rowStamp(row)
-    if (justPulled.has(`${row.roundId}@${stamp}`)) return false
-    // Strictly newer than the last push. An edit made in the same millisecond
-    // as the previous push completed would be skipped, which cannot happen in
-    // practice because a push is network I/O — and the alternative (>=) would
-    // re-upload the whole record on every idle sync.
-    return !cursors.lastPushedAt || stamp > cursors.lastPushedAt
-  })
+  // Everything the server is known to hold, per round: what it just handed us,
+  // on top of what this device has already put there.
+  const onServer: Record<string, string> = { ...cursors.pushed }
+  for (const row of pulled) onServer[row.roundId] = rowStamp(row)
 
+  const outgoing = toRows(merged).filter((row) => onServer[row.roundId] !== rowStamp(row))
   if (outgoing.length > 0) await remote.push(outgoing)
+  for (const row of outgoing) onServer[row.roundId] = rowStamp(row)
 
   return {
     state: merged,
     cursors: {
-      // Rows we just pushed are on the server and have been seen, so they
-      // advance the pull cursor too. Without this a device that only ever
-      // pushes keeps re-pulling its own writes forever.
-      lastPulledAt: highest(
-        [...pulled.map(rowStamp), ...outgoing.map(rowStamp)],
-        cursors.lastPulledAt,
+      lastPulledCursor: highest(
+        pulled.map((row) => row.cursor),
+        cursors.lastPulledCursor,
       ),
-      lastPushedAt: highest(outgoing.map(rowStamp), cursors.lastPushedAt),
+      pushed: onServer,
     },
     pulled: pulled.length,
     pushed: outgoing.length,
@@ -1449,12 +1542,36 @@ create table if not exists public.rounds (
   payload    jsonb,
   updated_at text not null,
   deleted_at text,
+  -- Server-assigned, monotonic in commit order, and the ONLY thing the client's
+  -- pull cursor advances on. updated_at is a client clock: a device running
+  -- fast would carry a timestamp-based cursor past rows other devices had not
+  -- written yet and never be handed them again.
+  cursor     text not null,
   primary key (user_id, round_id)
 );
 
--- Serves the incremental pull: rows changed since a cursor, for one account.
-create index if not exists rounds_user_updated
-  on public.rounds (user_id, updated_at);
+create sequence if not exists public.rounds_cursor_seq;
+
+-- Zero-padded so the client can compare cursors lexicographically, exactly as
+-- the in-memory fake does.
+create or replace function public.stamp_cursor()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.cursor := lpad(nextval('public.rounds_cursor_seq')::text, 20, '0');
+  return new;
+end;
+$$;
+
+drop trigger if exists rounds_stamp_cursor on public.rounds;
+create trigger rounds_stamp_cursor
+  before insert or update on public.rounds
+  for each row execute function public.stamp_cursor();
+
+-- Serves the incremental pull: rows after a cursor, for one account.
+create index if not exists rounds_user_cursor
+  on public.rounds (user_id, cursor);
 
 alter table public.rounds enable row level security;
 
@@ -1489,7 +1606,7 @@ Create `src/data/sync/supabase.ts`:
 
 ```ts
 import type { Round } from '@/domain/whs/types'
-import type { RemoteRound, RemoteStore } from './remote'
+import type { OutgoingRound, RemoteStore } from './remote'
 
 const URL = import.meta.env.VITE_SUPABASE_URL as string | undefined
 const ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
@@ -1524,6 +1641,8 @@ interface Row {
   payload: Round | null
   updated_at: string
   deleted_at: string | null
+  /** Server-assigned by the stamp_cursor trigger; never written by a client. */
+  cursor: string
 }
 
 export function createSupabaseRemote(accountId: string): RemoteStore {
@@ -1532,11 +1651,11 @@ export function createSupabaseRemote(accountId: string): RemoteStore {
       const supabase = await supabaseClient()
       let query = supabase
         .from('rounds')
-        .select('round_id, payload, updated_at, deleted_at')
+        .select('round_id, payload, updated_at, deleted_at, cursor')
         .eq('user_id', accountId)
-      if (since) query = query.gt('updated_at', since)
+      if (since) query = query.gt('cursor', since)
 
-      const { data, error } = await query.order('updated_at', { ascending: true })
+      const { data, error } = await query.order('cursor', { ascending: true })
       if (error) throw new Error(error.message)
 
       return (data ?? []).map((row: Row) => ({
@@ -1544,10 +1663,11 @@ export function createSupabaseRemote(accountId: string): RemoteStore {
         payload: row.payload,
         updatedAt: iso(row.updated_at),
         deletedAt: row.deleted_at ? iso(row.deleted_at) : null,
+        cursor: row.cursor,
       }))
     },
 
-    async push(rows: RemoteRound[]) {
+    async push(rows: OutgoingRound[]) {
       if (rows.length === 0) return
       const supabase = await supabaseClient()
       const { error } = await supabase.from('rounds').upsert(

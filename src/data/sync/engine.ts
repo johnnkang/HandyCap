@@ -5,12 +5,24 @@ import type { SyncState } from './types'
 /**
  * Where this device got to.
  *
- * Both cursors are derived from row timestamps rather than the local clock, so
- * a wrong device clock cannot make the device skip rows it has never seen.
+ * Two different mechanisms deliberately, because they answer two different
+ * questions and only one of them can trust a client clock.
  */
 export interface SyncCursors {
-  lastPulledAt?: string
-  lastPushedAt?: string
+  /**
+   * High-water mark over server-assigned cursors. Advances ONLY on an actual
+   * pull — never from rows this device pushed, because a device whose clock
+   * runs fast would otherwise carry its cursor past rows other devices had not
+   * written yet, and never be given them again.
+   */
+  lastPulledCursor?: string
+  /**
+   * roundId -> the stamp this device last got onto the server. Exact, so a
+   * round stamped earlier than a previous push (a corrected clock, a round
+   * entered late) still uploads instead of falling under a high-water mark
+   * forever. Bounded by the number of rounds, which is tens.
+   */
+  pushed?: Record<string, string>
 }
 
 export interface SyncOutcome {
@@ -28,42 +40,35 @@ const highest = (values: string[], fallback?: string): string | undefined =>
  * and push anything the server has not seen.
  *
  * There is no offline write queue, because the merge is idempotent — a failed
- * sync is simply a sync that has not happened yet.
+ * sync is simply a sync that has not happened yet. There is no clock either:
+ * every cursor comes from the data, so a wrong device clock cannot make this
+ * device skip rows it has never seen.
  */
 export async function syncOnce(
   local: SyncState,
   remote: RemoteStore,
   cursors: SyncCursors,
 ): Promise<SyncOutcome> {
-  const pulled = await remote.pull(cursors.lastPulledAt)
+  const pulled = await remote.pull(cursors.lastPulledCursor)
   const merged = mergeStates(local, toSyncState(pulled))
 
-  // Rows we have just received are already on the server; pushing them back is
-  // harmless but wasteful, so they are skipped by identity.
-  const justPulled = new Set(pulled.map((row) => `${row.roundId}@${rowStamp(row)}`))
-  const outgoing = toRows(merged).filter((row) => {
-    const stamp = rowStamp(row)
-    if (justPulled.has(`${row.roundId}@${stamp}`)) return false
-    // Strictly newer than the last push. An edit made in the same millisecond
-    // as the previous push completed would be skipped, which cannot happen in
-    // practice because a push is network I/O — and the alternative (>=) would
-    // re-upload the whole record on every idle sync.
-    return !cursors.lastPushedAt || stamp > cursors.lastPushedAt
-  })
+  // Everything the server is known to hold, per round: what it just handed us,
+  // on top of what this device has already put there.
+  const onServer: Record<string, string> = { ...cursors.pushed }
+  for (const row of pulled) onServer[row.roundId] = rowStamp(row)
 
+  const outgoing = toRows(merged).filter((row) => onServer[row.roundId] !== rowStamp(row))
   if (outgoing.length > 0) await remote.push(outgoing)
+  for (const row of outgoing) onServer[row.roundId] = rowStamp(row)
 
   return {
     state: merged,
     cursors: {
-      // Rows we just pushed are on the server and have been seen, so they
-      // advance the pull cursor too. Without this a device that only ever
-      // pushes keeps re-pulling its own writes forever.
-      lastPulledAt: highest(
-        [...pulled.map(rowStamp), ...outgoing.map(rowStamp)],
-        cursors.lastPulledAt,
+      lastPulledCursor: highest(
+        pulled.map((row) => row.cursor),
+        cursors.lastPulledCursor,
       ),
-      lastPushedAt: highest(outgoing.map(rowStamp), cursors.lastPushedAt),
+      pushed: onServer,
     },
     pulled: pulled.length,
     pushed: outgoing.length,

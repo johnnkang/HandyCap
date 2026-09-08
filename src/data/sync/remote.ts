@@ -14,23 +14,44 @@ export interface RemoteRound {
   payload: Round | null
   updatedAt: string
   deletedAt: string | null
+  /**
+   * Server-assigned, monotonically increasing in commit order.
+   *
+   * This is the ONLY value the pull cursor may advance on. `updatedAt` comes
+   * from the writing device's clock, so a device running fast would push its
+   * cursor past rows other devices had not yet written and never see them
+   * again. Ordering for transfer is the server's job; ordering for conflict
+   * resolution is what `updatedAt` is for. Keeping them separate is what makes
+   * a wrong device clock merely unfair rather than data-hiding.
+   */
+  cursor: string
 }
+
+/** A row as a client offers it: the server assigns the cursor. */
+export type OutgoingRound = Omit<RemoteRound, 'cursor'>
 
 export interface RemoteStore {
   /**
-   * Rows changed strictly after `since`; every row when `since` is undefined.
+   * Rows with a cursor strictly after `since`; every row when `since` is
+   * undefined.
    *
    * This returns a DELTA. A round absent from the result is unchanged, never
    * deleted — reading absence as deletion would destroy the user's history.
    */
   pull(since: string | undefined): Promise<RemoteRound[]>
-  push(rows: RemoteRound[]): Promise<void>
+  push(rows: OutgoingRound[]): Promise<void>
   /** Remove every row for this account. Used by account deletion. */
   deleteEverything(): Promise<void>
 }
 
-/** The timestamp a row is ordered by, whichever kind it is. */
-export const rowStamp = (row: RemoteRound): string => row.deletedAt ?? row.updatedAt
+/**
+ * The timestamp a row is ordered by, whichever kind it is.
+ *
+ * Takes only the two fields it reads, so it accepts an `OutgoingRound` — which
+ * has no cursor yet — as readily as a stored `RemoteRound`.
+ */
+export const rowStamp = (row: Pick<RemoteRound, 'updatedAt' | 'deletedAt'>): string =>
+  row.deletedAt ?? row.updatedAt
 
 export function toSyncState(rows: RemoteRound[]): SyncState {
   const state = emptySyncState()
@@ -41,7 +62,7 @@ export function toSyncState(rows: RemoteRound[]): SyncState {
   return state
 }
 
-export function toRows(state: SyncState): RemoteRound[] {
+export function toRows(state: SyncState): OutgoingRound[] {
   return [
     ...state.rounds.map((entry) => ({
       roundId: entry.round.id,
@@ -59,20 +80,31 @@ export function toRows(state: SyncState): RemoteRound[] {
 }
 
 /** In-memory `RemoteStore`, so the engine is tested without a network. */
-export function createMemoryRemote(seed: RemoteRound[] = []): RemoteStore {
-  const rows = new Map<string, RemoteRound>(seed.map((row) => [row.roundId, row]))
+export function createMemoryRemote(seed: OutgoingRound[] = []): RemoteStore {
+  const rows = new Map<string, RemoteRound>()
+  let sequence = 0
+
+  const write = (row: OutgoingRound) => {
+    // Zero-padded so cursors compare lexicographically, matching how the real
+    // server hands them out.
+    sequence += 1
+    rows.set(row.roundId, { ...row, cursor: String(sequence).padStart(12, '0') })
+  }
+  for (const row of seed) write(row)
+
   return {
     async pull(since) {
-      const all = [...rows.values()]
-      const changed = since ? all.filter((row) => rowStamp(row) > since) : all
-      return changed
+      return [...rows.values()]
+        .filter((row) => !since || row.cursor > since)
+        .sort((a, b) => a.cursor.localeCompare(b.cursor))
         .map((row) => ({ ...row }))
-        .sort((a, b) => rowStamp(a).localeCompare(rowStamp(b)))
     },
     async push(incoming) {
-      for (const row of incoming) rows.set(row.roundId, { ...row })
+      for (const row of incoming) write(row)
     },
     async deleteEverything() {
+      // The sequence deliberately keeps climbing: reusing a cursor would hide
+      // new rows from a device that had already seen the old one.
       rows.clear()
     },
   }

@@ -66,13 +66,69 @@ describe('syncOnce', () => {
     expect(outcome.pushed).toBe(0)
   })
 
-  test('a second sync with no changes does nothing', async () => {
+  test('an idle device settles into pulling and pushing nothing', async () => {
     const remote = createMemoryRemote()
     const local = withRound('a', '2026-05-01', '2026-05-01T00:00:00.000Z')
+
     const first = await syncOnce(local, remote, {})
+    expect(first.pushed).toBe(1)
+
+    // The first sync pulled nothing, so its cursor is still unset and this one
+    // is handed back the row it wrote. It must not push it a second time.
     const second = await syncOnce(first.state, remote, first.cursors)
     expect(second.pushed).toBe(0)
-    expect(second.pulled).toBe(0)
     expect(second.state).toEqual(first.state)
+
+    // The cursor has advanced now, so the device is fully idle.
+    const third = await syncOnce(second.state, remote, second.cursors)
+    expect(third.pulled).toBe(0)
+    expect(third.pushed).toBe(0)
+    expect(third.state).toEqual(first.state)
+  })
+
+  test('a device with a fast clock can still see other devices', async () => {
+    const remote = createMemoryRemote()
+
+    // This device's clock is years ahead.
+    const skewed = withRound('mine', '2026-05-01', '2030-01-01T00:00:00.000Z')
+    let cursors = (await syncOnce(skewed, remote, {})).cursors
+    cursors = (await syncOnce(skewed, remote, cursors)).cursors
+
+    // Another device, clock correct, posts a round.
+    await remote.push(toRows(withRound('theirs', '2026-05-02', '2026-09-08T00:00:00.000Z')))
+
+    // A cursor built from client timestamps would sit at 2030 and filter this
+    // row out forever. A server-assigned cursor cannot.
+    const outcome = await syncOnce(skewed, remote, cursors)
+    expect(outcome.state.rounds.map((entry) => entry.round.id).sort()).toEqual([
+      'mine',
+      'theirs',
+    ])
+  })
+
+  test('a round stamped earlier than an earlier push still uploads', async () => {
+    const remote = createMemoryRemote()
+    const first = await syncOnce(
+      withRound('a', '2026-05-01', '2026-06-01T00:00:00.000Z'),
+      remote,
+      {},
+    )
+
+    // A second round carrying an earlier stamp — a corrected clock, or a round
+    // entered late. A single high-water mark would drop it permanently.
+    const local: SyncState = {
+      rounds: [
+        ...first.state.rounds,
+        {
+          round: testRound({ id: 'b', date: '2026-04-01', totalStrokes: 88 }),
+          updatedAt: '2026-05-15T00:00:00.000Z',
+        },
+      ],
+      tombstones: [],
+    }
+
+    const second = await syncOnce(local, remote, first.cursors)
+    expect(second.pushed).toBe(1)
+    expect((await remote.pull(undefined)).map((row) => row.roundId).sort()).toEqual(['a', 'b'])
   })
 })
