@@ -119,4 +119,58 @@ describe('repository sync state', () => {
     await target.importJson(exported)
     expect((await target.loadState()).rounds[0]!.updatedAt).toBe('2026-07-01T00:00:00.000Z')
   })
+
+  test('migrates once and does not re-stamp on later loads', async () => {
+    const store = createMemoryStore()
+    await store.set('handycap:rounds', [
+      testRound({ id: 'old', date: '2026-04-01', totalStrokes: 88 }),
+    ])
+    await store.set('handycap:schemaVersion', 1)
+
+    // A clock that moves on every read, so a second migration would produce a
+    // different timestamp and be visible. Under a fixed clock it would not be.
+    let tick = 0
+    const advancing = () => `2026-06-${String(++tick).padStart(2, '0')}T00:00:00.000Z`
+
+    const repo = createRepository(store, { now: advancing })
+    const first = (await repo.loadState()).rounds[0]!.updatedAt
+    const second = (await repo.loadState()).rounds[0]!.updatedAt
+
+    expect(second).toBe(first)
+  })
+
+  test('re-saving a deleted round clears its tombstone', async () => {
+    const repo = syncRepo()
+    const round = testRound({ id: 'r1', date: '2026-05-01', totalStrokes: 90 })
+    await repo.saveRound(round)
+    await repo.deleteRound('r1')
+    await repo.saveRound(round)
+
+    const state = await repo.loadState()
+    expect(state.rounds.map((entry) => entry.round.id)).toEqual(['r1'])
+    // A stale tombstone would delete this round again on the next merge.
+    expect(state.tombstones).toEqual([])
+  })
+
+  test('deleting a round that was never here still leaves a tombstone', async () => {
+    const repo = syncRepo()
+    await repo.deleteRound('never-existed')
+
+    expect((await repo.loadState()).tombstones).toEqual([
+      { id: 'never-existed', deletedAt: '2026-06-01T00:00:00.000Z' },
+    ])
+  })
+
+  test('replaceState discards rounds absent from the new state', async () => {
+    const repo = syncRepo()
+    await repo.saveRound(testRound({ id: 'gone', date: '2026-05-01', totalStrokes: 90 }))
+
+    const kept = testRound({ id: 'kept', date: '2026-05-05', totalStrokes: 85 })
+    await repo.replaceState({
+      ...emptySyncState(),
+      rounds: [{ round: kept, updatedAt: '2026-05-05T00:00:00.000Z' }],
+    })
+
+    expect((await repo.loadRounds()).map((round) => round.id)).toEqual(['kept'])
+  })
 })
