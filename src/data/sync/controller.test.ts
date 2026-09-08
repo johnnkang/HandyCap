@@ -67,4 +67,31 @@ describe('sync controller', () => {
     await expect(broken.sync()).rejects.toThrow('offline')
     expect((await repository.loadRounds()).map((r) => r.id)).toEqual(['a'])
   })
+
+  test('a failure while pushing leaves local data and cursors untouched', async () => {
+    const { repository } = setup()
+    await repository.saveRound(testRound({ id: 'a', date: '2026-05-01', totalStrokes: 90 }))
+
+    // The other half of the failure story: the pull and the merge both succeed,
+    // and the network dies on the way back up.
+    const store = createMemoryStore()
+    const broken = createSyncController({
+      repository,
+      store,
+      accountId: 'acct-1',
+      remote: {
+        pull: async () => [],
+        push: async () => {
+          throw new Error('offline mid-push')
+        },
+        deleteEverything: async () => {},
+      },
+    })
+
+    await expect(broken.sync()).rejects.toThrow('offline mid-push')
+    expect((await repository.loadRounds()).map((round) => round.id)).toEqual(['a'])
+    // No cursor was recorded either, so the next attempt does not believe it
+    // has already pushed the round.
+    expect(await store.get('handycap:cursors:acct-1')).toBeUndefined()
+  })
 })
