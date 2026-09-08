@@ -1,10 +1,13 @@
 import type { Round } from '@/domain/whs/types'
+import { emptySyncState, type SyncState } from '@/data/sync/types'
 import type { KeyValueStore } from './store'
 
 /** Bump when the stored shape changes, and add a migration below. */
-export const CURRENT_SCHEMA_VERSION = 1
+export const CURRENT_SCHEMA_VERSION = 2
 
-const ROUNDS_KEY = 'handycap:rounds'
+/** v1 wrote a bare `Round[]` here. Read only, for the migration. */
+const LEGACY_ROUNDS_KEY = 'handycap:rounds'
+const STATE_KEY = 'handycap:sync'
 const VERSION_KEY = 'handycap:schemaVersion'
 
 export interface HandyCapExport {
@@ -19,42 +22,90 @@ export interface Repository {
   deleteRound(id: string): Promise<void>
   exportJson(): Promise<string>
   importJson(json: string): Promise<void>
+  /** The record plus its sync bookkeeping. Used by the sync engine. */
+  loadState(): Promise<SyncState>
+  /** Replace the whole record, as the result of a completed sync. */
+  replaceState(state: SyncState): Promise<void>
+}
+
+export interface RepositoryOptions {
+  /** Injected so tests are deterministic. */
+  now?: () => string
 }
 
 const byDate = (a: Round, b: Round) => a.date.localeCompare(b.date) || a.id.localeCompare(b.id)
 
-export function createRepository(store: KeyValueStore): Repository {
-  async function readRounds(): Promise<Round[]> {
-    return (await store.get<Round[]>(ROUNDS_KEY)) ?? []
+export function createRepository(
+  store: KeyValueStore,
+  { now = () => new Date().toISOString() }: RepositoryOptions = {},
+): Repository {
+  async function readState(): Promise<SyncState> {
+    const stored = await store.get<SyncState>(STATE_KEY)
+    if (stored) return stored
+
+    // v1 -> v2. At this moment the device holds the only copy of the data that
+    // exists, so "last written now" is the correct reading.
+    const legacy = await store.get<Round[]>(LEGACY_ROUNDS_KEY)
+    if (!legacy) return emptySyncState()
+
+    const at = now()
+    const migrated: SyncState = {
+      rounds: legacy.map((round) => ({ round, updatedAt: at })),
+      tombstones: [],
+    }
+    await writeState(migrated)
+    return migrated
   }
 
-  async function writeRounds(rounds: Round[]): Promise<void> {
-    await store.set(ROUNDS_KEY, [...rounds].sort(byDate))
+  async function writeState(state: SyncState): Promise<void> {
+    await store.set(STATE_KEY, state)
     await store.set(VERSION_KEY, CURRENT_SCHEMA_VERSION)
   }
 
   return {
     async loadRounds() {
-      return [...(await readRounds())].sort(byDate)
+      return (await readState()).rounds.map((entry) => entry.round).sort(byDate)
+    },
+
+    async loadState() {
+      return readState()
+    },
+
+    async replaceState(state) {
+      await writeState(state)
     },
 
     async saveRound(round) {
-      const rounds = await readRounds()
-      const existing = rounds.findIndex((candidate) => candidate.id === round.id)
-      if (existing >= 0) rounds[existing] = round
-      else rounds.push(round)
-      await writeRounds(rounds)
+      const state = await readState()
+      const at = now()
+      const rounds = state.rounds.filter((entry) => entry.round.id !== round.id)
+      rounds.push({ round, updatedAt: at })
+      await writeState({
+        rounds,
+        // A re-saved round outlives any earlier deletion of the same id.
+        tombstones: state.tombstones.filter((tombstone) => tombstone.id !== round.id),
+      })
     },
 
     async deleteRound(id) {
-      await writeRounds((await readRounds()).filter((round) => round.id !== id))
+      const state = await readState()
+      await writeState({
+        rounds: state.rounds.filter((entry) => entry.round.id !== id),
+        tombstones: [
+          ...state.tombstones.filter((tombstone) => tombstone.id !== id),
+          { id, deletedAt: now() },
+        ],
+      })
     },
 
     async exportJson() {
+      const state = await readState()
+      // The export is a human-facing backup and deliberately carries no sync
+      // bookkeeping, so it stays readable and importable by any version.
       const payload: HandyCapExport = {
         schemaVersion: CURRENT_SCHEMA_VERSION,
-        exportedAt: new Date().toISOString(),
-        rounds: await readRounds(),
+        exportedAt: now(),
+        rounds: state.rounds.map((entry) => entry.round).sort(byDate),
       }
       return JSON.stringify(payload, null, 2)
     },
@@ -84,7 +135,11 @@ export function createRepository(store: KeyValueStore): Repository {
         )
       }
 
-      await writeRounds(rounds)
+      const at = now()
+      await writeState({
+        rounds: rounds.map((round) => ({ round, updatedAt: at })),
+        tombstones: [],
+      })
     },
   }
 }
