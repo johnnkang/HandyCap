@@ -131,4 +131,18 @@ describe('syncOnce', () => {
     expect(second.pushed).toBe(1)
     expect((await remote.pull(undefined)).map((row) => row.roundId).sort()).toEqual(['a', 'b'])
   })
+
+  test('the merge winner reaches the server even when both sides tie on a stamp', async () => {
+    const tie = '2026-05-01T00:00:00.000Z'
+    // Same round, same instant, different score. The merge breaks the tie on
+    // content; whichever it picks has to end up on the server, or the two
+    // devices disagree permanently.
+    const remote = createMemoryRemote(toRows(withRound('a', '2026-05-01', tie, 84)))
+    const local = withRound('a', '2026-05-01', tie, 90)
+
+    const outcome = await syncOnce(local, remote, {})
+
+    const [row] = await remote.pull(undefined)
+    expect(row!.payload!.totalStrokes).toBe(outcome.state.rounds[0]!.round.totalStrokes)
+  })
 })
