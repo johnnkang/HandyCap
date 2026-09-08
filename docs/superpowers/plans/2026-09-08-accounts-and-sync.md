@@ -864,6 +864,10 @@ export async function syncOnce(
   const outgoing = toRows(merged).filter((row) => {
     const stamp = rowStamp(row)
     if (justPulled.has(`${row.roundId}@${stamp}`)) return false
+    // Strictly newer than the last push. An edit made in the same millisecond
+    // as the previous push completed would be skipped, which cannot happen in
+    // practice because a push is network I/O — and the alternative (>=) would
+    // re-upload the whole record on every idle sync.
     return !cursors.lastPushedAt || stamp > cursors.lastPushedAt
   })
 
@@ -872,7 +876,13 @@ export async function syncOnce(
   return {
     state: merged,
     cursors: {
-      lastPulledAt: highest(pulled.map(rowStamp), cursors.lastPulledAt),
+      // Rows we just pushed are on the server and have been seen, so they
+      // advance the pull cursor too. Without this a device that only ever
+      // pushes keeps re-pulling its own writes forever.
+      lastPulledAt: highest(
+        [...pulled.map(rowStamp), ...outgoing.map(rowStamp)],
+        cursors.lastPulledAt,
+      ),
       lastPushedAt: highest(outgoing.map(rowStamp), cursors.lastPushedAt),
     },
     pulled: pulled.length,
@@ -1299,11 +1309,18 @@ describe('sync controller', () => {
   })
 
   test('keeps cursors separate per account', async () => {
-    const { store, repository, remote, controller } = setup()
+    const { store, repository, controller } = setup()
     await repository.saveRound(testRound({ id: 'a', date: '2026-05-01', totalStrokes: 90 }))
     await controller.sync()
 
-    const other = createSyncController({ repository, store, remote, accountId: 'acct-2' })
+    // A different account has its own remote and its own cursors, so the record
+    // uploads again rather than being mistaken for already synced.
+    const other = createSyncController({
+      repository,
+      store,
+      remote: createMemoryRemote(),
+      accountId: 'acct-2',
+    })
     const outcome = await other.sync()
     expect(outcome.pushed).toBeGreaterThan(0)
   })
