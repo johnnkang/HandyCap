@@ -2287,19 +2287,19 @@ const stateOf = (...ids: string[]): SyncState => ({
 })
 
 describe('adoption', () => {
-  test('counts what the device contributed', () => {
+  test('separates what the device held from what the account brought', () => {
     expect(summariseAdoption(stateOf('a', 'b'), stateOf('a', 'b', 'c', 'd'))).toEqual({
-      before: 2,
-      added: 2,
-      after: 4,
+      onDevice: 2,
+      fromAccount: 2,
+      total: 4,
     })
   })
 
-  test('reports nothing added when the account already had everything', () => {
+  test('reports nothing arriving when the account had nothing new', () => {
     expect(summariseAdoption(stateOf('a'), stateOf('a'))).toEqual({
-      before: 1,
-      added: 0,
-      after: 1,
+      onDevice: 1,
+      fromAccount: 0,
+      total: 1,
     })
   })
 
@@ -2343,19 +2343,24 @@ import type { SyncState } from './types'
 const UNDO_KEY = 'handycap:adoptionUndo'
 
 export interface AdoptionSummary {
-  /** Rounds on this device before signing in. */
-  before: number
-  /** Rounds the account brought that this device did not have. */
-  added: number
-  after: number
+  /** Rounds this device already held before signing in. */
+  onDevice: number
+  /** Rounds the account brought down that this device did not have. */
+  fromAccount: number
+  total: number
 }
 
+/**
+ * Named for what each number means to the person reading the card, because the
+ * obvious names invite exactly the wrong reading: the count of rounds that
+ * arrived is a property of the *account*, not of the device.
+ */
 export function summariseAdoption(before: SyncState, after: SyncState): AdoptionSummary {
   const had = new Set(before.rounds.map((entry) => entry.round.id))
   return {
-    before: before.rounds.length,
-    added: after.rounds.filter((entry) => !had.has(entry.round.id)).length,
-    after: after.rounds.length,
+    onDevice: before.rounds.length,
+    fromAccount: after.rounds.filter((entry) => !had.has(entry.round.id)).length,
+    total: after.rounds.length,
   }
 }
 
@@ -2375,7 +2380,22 @@ export const clearUndoSnapshot = (store: KeyValueStore): Promise<void> => store.
 
 - [ ] **Step 4: Wire it into the provider**
 
-In `AppState.tsx`, in `syncNow`, when `account` has just become non-null and this is the first sync for that account:
+**Adoption happens once per account per device, ever — not once per mount.** A
+returning signed-in user cold-starts the PWA with a session already restored,
+which is indistinguishable from a fresh sign-in at the provider level. A ref
+resets on every mount, so gating on one would re-run adoption on every app open
+and show the card constantly. Persist the marker in the injectable store beside
+the cursors:
+
+```ts
+const adoptedKey = (accountId: string) => `handycap:adopted:${accountId}`
+```
+
+Adoption runs only when that key is absent; it is set as soon as the summary is
+computed, before the card is shown, so an interrupted session cannot re-run it.
+
+In `AppState.tsx`, in `syncNow`, when this account has not yet been adopted on
+this device:
 
 ```ts
       const before = await repo.loadState()
@@ -2386,13 +2406,45 @@ In `AppState.tsx`, in `syncNow`, when `account` has just become non-null and thi
 ```
 
 `store` here is the provider's injectable store from Task 9, so this is
-testable. Add `adoption`, `undoAdoption` (restore via `takeUndoSnapshot` then `repo.replaceState` and `setRounds`), and `dismissAdoption` (`clearUndoSnapshot` and `setAdoption(null)`) to the context value. Only the *first* sync after a sign-in produces a summary; later syncs must not.
+testable. Add `adoption`, `undoAdoption` (restore via `takeUndoSnapshot`, then
+`repo.replaceState`, `setRounds`, clear the adopted marker and the account's
+cursors, and `authClient.signOut()`), and `dismissAdoption` (`clearUndoSnapshot`
+and `setAdoption(null)`) to the context value. Adoption runs once per account
+per device, guarded by the persisted marker — not once per mount.
 
 - [ ] **Step 5: Build the summary component**
 
-Create `src/ui/components/MergeSummary.tsx`: renders nothing when `adoption` is null or `adoption.added === 0 && adoption.before === 0`. Otherwise a dismissible card reading e.g. *"Your account had 34 rounds. This device added 12. You now have 46."* with "Undo" and "Looks right" actions. Follow `IndexChangeCard.tsx` for structure and tone — the domain returns numbers, the component owns every word.
+Create `src/ui/components/MergeSummary.tsx`: renders nothing when `adoption` is
+null or `adoption.total === 0`. Otherwise a dismissible card reading e.g. *"Your
+account had 34 rounds. This device added 12. You now have 46."* with an undo
+action and "Looks right". Follow `IndexChangeCard.tsx` for structure and tone —
+the domain returns numbers, the component owns every word.
 
-Create `src/ui/components/MergeSummary.test.tsx` covering: renders nothing for a guest; shows the three counts; "Undo" restores the pre-merge round count; "Looks right" dismisses it and it does not return on re-render.
+**What the undo can honestly promise.** Rolling back only the local record does
+not undo anything: the device's rounds are already on the server, so the next
+sync pulls the merged record straight back. An "Undo" that silently reverts
+itself minutes later is worse than no undo at all, and this feature cannot
+afford to be dishonest about data.
+
+So the action restores the local record to its pre-sign-in state **and signs
+out**, which together are genuinely reversible on this device. Rounds already
+uploaded remain in the account, and the card says so rather than hiding it —
+they can be removed from the account screen. Label it for what it does, e.g.
+**"Undo and sign out"**, with a line of explanation beneath:
+
+> Your rounds go back to how they were on this phone. The ones already uploaded
+> stay in your account.
+
+Implement it in the provider as: restore from `takeUndoSnapshot`, clear the
+per-account adopted marker and cursors so a later sign-in adopts cleanly, then
+`authClient.signOut()`.
+
+Create `src/ui/components/MergeSummary.test.tsx` covering: renders nothing for a
+guest; renders nothing when `total` is 0; shows the three counts; the undo
+action restores the pre-merge round count **and leaves the user signed out**;
+"Looks right" dismisses it and it does not return on re-render; and — the case
+that would have caught the cold-start bug — a device that is already fully
+synced (`fromAccount === 0`, `onDevice > 0`) shows no card on a later mount.
 
 - [ ] **Step 6: Run tests and typecheck**
 
