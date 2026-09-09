@@ -2223,6 +2223,9 @@ Create `src/ui/screens/AccountScreen.tsx`. Read `src/ui/screens/AboutScreen.tsx`
 
 - **Signed out:** a heading, the honest framing — *"Your rounds live only on this phone. If you lose it, they're gone."* — an email input labelled "Email", and a button "Email me a link". After sending, replace the form with "Check your email — we sent a link to `<address>`." and a "use a different address" reset.
 - **Validation:** reject anything without `@` and a dot in the domain with the message "Enter a valid email address."; do not call `sendMagicLink`.
+- **Sending can fail.** If `sendMagicLink` rejects, catch it, keep the form on screen with the address still typed, and say so plainly — "Couldn't send the link. Check your connection and try again." An app that promises honest failure states must not fail silently, and an unhandled rejection is the worst version of that.
+- **Announce the confirmation.** The "Check your email" message replaces the form, so give it `role="status"` — otherwise a screen-reader user gets no notice that anything happened.
+- `onClose` is **required**, matching `AboutScreen`. An overlay whose close button might silently do nothing is worse than a compile error.
 - **Signed in:** show the address, the sync status in plain words (`idle` → "Everything is backed up", `syncing` → "Syncing…", `offline` → "Offline — your rounds are safe on this device", `error` → "Couldn't reach the server. Your rounds are safe on this device."), a "Sync now" button calling `syncNow`, and a "Sign out" button (Task 12 extends this).
 - **Guest mode is never disparaged.** No copy implying the app is worse without an account.
 
