@@ -14,7 +14,7 @@ const SYNC_MESSAGE: Record<SyncStatus, string> = {
   error: "Couldn't reach the server. Your rounds are safe on this device.",
 }
 
-export function AccountScreen({ onClose = () => {} }: { onClose?: () => void }) {
+export function AccountScreen({ onClose }: { onClose: () => void }) {
   const { account, syncStatus, syncNow, auth, rounds, signOut, deleteAccount } = useAppState()
   const [justSignedOutCount, setJustSignedOutCount] = useState<number | null>(null)
 

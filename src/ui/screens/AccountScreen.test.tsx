@@ -70,7 +70,7 @@ describe('leaving', () => {
 
   test('signing out keeps the rounds on the device', async () => {
     const auth = signedIn()
-    await renderWithState(<AccountScreen />, {
+    await renderWithState(<AccountScreen onClose={() => {}} />, {
       auth,
       remoteFor: () => createMemoryRemote(),
       rounds: [testRound({ id: 'a', date: '2026-05-01', totalStrokes: 90 })],
@@ -84,7 +84,7 @@ describe('leaving', () => {
 
   test('offers a separate sign out that removes local data', async () => {
     const auth = signedIn()
-    const { repository } = await renderWithState(<AccountScreen />, {
+    const { repository } = await renderWithState(<AccountScreen onClose={() => {}} />, {
       auth,
       remoteFor: () => createMemoryRemote(),
       rounds: [testRound({ id: 'a', date: '2026-05-01', totalStrokes: 90 })],
@@ -98,7 +98,7 @@ describe('leaving', () => {
 
   test('deleting the account needs the email typed to confirm', async () => {
     const auth = signedIn()
-    await renderWithState(<AccountScreen />, { auth, remoteFor: () => createMemoryRemote() })
+    await renderWithState(<AccountScreen onClose={() => {}} />, { auth, remoteFor: () => createMemoryRemote() })
 
     await userEvent.click(await screen.findByRole('button', { name: /delete my account/i }))
     const confirm = await screen.findByRole('button', { name: /permanently delete/i })
@@ -151,7 +151,7 @@ describe('leaving', () => {
 
   test('deleting the account leaves the local rounds alone', async () => {
     const auth = signedIn()
-    const { repository } = await renderWithState(<AccountScreen />, {
+    const { repository } = await renderWithState(<AccountScreen onClose={() => {}} />, {
       auth,
       remoteFor: () => createMemoryRemote(),
       rounds: [testRound({ id: 'a', date: '2026-05-01', totalStrokes: 90 })],
