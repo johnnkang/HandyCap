@@ -3,8 +3,9 @@
 Last updated 2026-09-09.
 
 `main` is deployed and green. A feature branch, **`accounts-and-sync`**, adds
-optional accounts and cross-device sync and is finished but **not yet merged or
-pushed** — see "In flight" below.
+optional accounts and cross-device sync. It is finished, reviewed and pushed to
+GitHub, but **deliberately not merged** — merging auto-deploys, and the sync
+engine has never run against a real Supabase project. See "In flight" below.
 
 On `main`: **241 tests**, typecheck clean, production build passing. Live at
 https://handycap-psi.vercel.app
