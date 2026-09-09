@@ -7,6 +7,10 @@ dist-ssr
 tsconfig.tsbuildinfo
 .playwright-mcp
 .env*
+!.env.example
 
 # Personal GHIN data used by the validation harness — never commit
 ghin-data.json
+
+# Local Supabase credentials
+.env.local
