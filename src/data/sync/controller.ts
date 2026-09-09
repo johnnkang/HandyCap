@@ -47,9 +47,12 @@ export function createSyncController({
       // sync re-pulls and re-pushes rows the server already has, which the
       // merge absorbs idempotently. The reverse order would record progress for
       // a record that was never written.
-      await repository.replaceState(mergeStates(await repository.loadState(), outcome.state))
+      const written = mergeStates(await repository.loadState(), outcome.state)
+      await repository.replaceState(written)
       await store.set(cursorKey(accountId), outcome.cursors)
-      return outcome
+      // The re-merged record, not the one the engine handed back: a caller
+      // reading `state` must see what is actually on the device.
+      return { ...outcome, state: written }
     },
   }
 }

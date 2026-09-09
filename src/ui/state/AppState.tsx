@@ -195,15 +195,17 @@ export function AppProvider({
   const syncing = useRef(false)
 
   /**
-   * Bumped by anything that ends this device's relationship with the account.
+   * Latched by anything that ends this device's relationship with the account,
+   * and released only when a new account session begins.
    *
    * Serialising alone is not enough. It stops a sync landing *after* a wipe,
-   * but a sync triggered while the wipe is still on the chain would queue
-   * behind it and then write the merged record straight back — the same
+   * but a sync started *while* the wipe is still on the chain would queue
+   * behind it and then write the account's record straight back — the same
    * borrowed phone full of someone else's rounds that the wipe exists to
-   * prevent, reached from the other side.
+   * prevent, reached from the other side. The window is not theoretical: the
+   * wipe waits on a network sign-out, and "Sync now" stays tappable throughout.
    */
-  const era = useRef(0)
+  const leaving = useRef(false)
 
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const cancelPendingSync = useCallback(() => {
@@ -220,14 +222,14 @@ export function AppProvider({
     // post-save debounce and the manual button all arrive here, and a second
     // sync behind the first would only redo work the first is already doing,
     // while a backlog of them holds up a wipe or an undo waiting on the chain.
+    // This device is on its way out of the account. Whatever is still on the
+    // chain — a wipe, an undo — is the last word on the local record.
+    if (leaving.current) return
     if (syncing.current) return
     syncing.current = true
-    const startedIn = era.current
     setSyncStatus('syncing')
     try {
       await serialise(async () => {
-        // Signed out — with or without a wipe — while this was queued.
-        if (era.current !== startedIn) return
         try {
           // Adoption happens once per account per device, ever — guarded by a
           // marker persisted in `store`, not by anything that resets on mount.
@@ -266,7 +268,7 @@ export function AppProvider({
     // A debounced sync left over from the last save would push the merged
     // record back down over the record being restored here.
     cancelPendingSync()
-    era.current += 1
+    leaving.current = true
     await serialise(async () => {
       const snapshot = await takeUndoSnapshot(store)
       if (!snapshot) return
@@ -295,7 +297,7 @@ export function AppProvider({
       // A debounced sync must not fire against an account this device is
       // leaving, least of all after a wipe has emptied the record.
       cancelPendingSync()
-      era.current += 1
+      leaving.current = true
       await serialise(async () => {
         if (wipeLocal && account) {
           // Wipe first, so a failure is reported while the user is still in a
@@ -340,6 +342,9 @@ export function AppProvider({
       setAdoption(null)
       return
     }
+    // A controller means an account session on this device, so whatever the
+    // last sign-out latched is over.
+    leaving.current = false
     void syncNow()
     const onFocus = () => void syncNow()
     window.addEventListener('online', onFocus)

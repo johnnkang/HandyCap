@@ -5,7 +5,7 @@ import { renderWithState } from '@/test/ui'
 import { useAppState } from './AppState'
 import { scoresOfBogey, testRound } from '@/test/fixtures'
 import type { Round } from '@/domain/whs/types'
-import { createMemoryAuth } from '@/data/auth/auth'
+import { createMemoryAuth, type AuthClient } from '@/data/auth/auth'
 import { createMemoryRemote, type RemoteStore } from '@/data/sync/remote'
 import { createMemoryStore, type KeyValueStore } from '@/data/repo/store'
 import { createRepository, type Repository } from '@/data/repo/repository'
@@ -328,6 +328,59 @@ describe('concurrent whole-record writes', () => {
     await waitFor(() => expect(screen.getByTestId('account')).toHaveTextContent('guest'))
 
     expect(await store.get('handycap:adoptionUndo')).toBeUndefined()
+  })
+
+  test('a sync started while the wipe is still running cannot put the rounds back', async () => {
+    const user = userEvent.setup()
+    const store = createMemoryStore()
+    const auth = signedIn()
+    // The wipe waits on a network sign-out, and "Sync now" is only disabled
+    // while a sync is running — so it stays tappable for the whole round trip.
+    let completeSignOut!: () => void
+    const held = new Promise<void>((resolve) => {
+      completeSignOut = resolve
+    })
+    const gatedAuth: AuthClient = {
+      ...auth,
+      async signOut() {
+        await held
+        await auth.signOut()
+      },
+    }
+
+    const { repository } = await renderWithState(<SyncProbe />, {
+      store,
+      auth: gatedAuth,
+      rounds: [bogeyRound('a', '2026-05-01')],
+      remoteFor: () =>
+        createMemoryRemote([
+          {
+            roundId: 'b',
+            payload: bogeyRound('b', '2026-05-02'),
+            updatedAt: '2026-05-02T00:00:00.000Z',
+            deletedAt: null,
+          },
+        ]),
+    })
+
+    // Let the sign-in sync finish, so the wipe is the only thing on the chain.
+    await waitFor(() => expect(screen.getByTestId('rounds')).toHaveTextContent('2'))
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('idle'))
+
+    await user.click(screen.getByRole('button', { name: 'wipe' }))
+    await waitFor(() => expect(screen.getByTestId('rounds')).toHaveTextContent('0'))
+    // Mid-wipe: the record is already empty, the sign-out has not come back.
+    await user.click(screen.getByRole('button', { name: 'sync again' }))
+
+    completeSignOut()
+    await waitFor(() => expect(screen.getByTestId('account')).toHaveTextContent('guest'))
+    // Anything the sync queued behind the wipe would run about here.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    expect(await repository.loadRounds()).toEqual([])
+    expect(await store.get('handycap:cursors:acct-1')).toBeUndefined()
   })
 
   test('a second syncNow started mid-sync cannot spoil the undo snapshot', async () => {
