@@ -2700,6 +2700,47 @@ describe('leaving', () => {
     expect(confirm).toBeEnabled()
   })
 
+  test('signing out with a wipe lets the same account restore the device', async () => {
+    const auth = signedIn()
+    const store = createMemoryStore()
+    const remote = createMemoryRemote()
+    const { repository } = await renderWithState(<AccountScreen onClose={() => {}} />, {
+      auth,
+      store,
+      remoteFor: () => remote,
+      rounds: [testRound({ id: 'a', date: '2026-05-01', totalStrokes: 90 })],
+    })
+
+    // Let the first sync push the round up before wiping.
+    await screen.findByText('golfer@example.com')
+    await userEvent.click(await screen.findByRole('button', { name: /remove.*this device/i }))
+    await userEvent.click(await screen.findByRole('button', { name: /yes, remove/i }))
+    expect(await repository.loadRounds()).toEqual([])
+
+    // The cursors must not survive the wipe, or signing back in pulls nothing
+    // and the record never returns.
+    expect(await store.get('handycap:cursors:acct-1')).toBeUndefined()
+    expect(await store.get('handycap:adopted:acct-1')).toBeUndefined()
+  })
+
+  test('deleting the account removes the rows from the server', async () => {
+    const auth = signedIn()
+    const remote = createMemoryRemote()
+    await renderWithState(<AccountScreen onClose={() => {}} />, {
+      auth,
+      remoteFor: () => remote,
+      rounds: [testRound({ id: 'a', date: '2026-05-01', totalStrokes: 90 })],
+    })
+
+    await screen.findByText('golfer@example.com')
+    await userEvent.click(await screen.findByRole('button', { name: /delete my account/i }))
+    await userEvent.type(screen.getByLabelText(/type your email/i), 'golfer@example.com')
+    await userEvent.click(screen.getByRole('button', { name: /permanently delete/i }))
+
+    // Not just the UI: the account's rows are actually gone.
+    await waitFor(async () => expect(await remote.pull(undefined)).toEqual([]))
+  })
+
   test('deleting the account leaves the local rounds alone', async () => {
     const auth = signedIn()
     const { repository } = await renderWithState(<AccountScreen />, {
@@ -2730,14 +2771,23 @@ In `AppState.tsx`, importing `emptySyncState` from `@/data/sync/types`:
 ```ts
   const signOut = useCallback(
     async ({ wipeLocal }: { wipeLocal: boolean }) => {
-      await authClient.signOut()
-      if (wipeLocal) {
+      if (wipeLocal && account) {
+        // Wipe first, so a failure is reported while the user is still in a
+        // state they recognise rather than after the screen has flipped to
+        // signed-out and told them the device is clean.
         await repo.replaceState(emptySyncState())
         setRounds([])
+        // The cursors describe a record this device no longer holds. Left
+        // behind, signing back in would pull nothing — every row on the server
+        // sits below the stored high-water mark — and the golfer would open an
+        // empty app that looks exactly like their history was destroyed.
+        await store.remove(cursorKey(account.id))
+        await store.remove(adoptedKey(account.id))
       }
+      await authClient.signOut()
       setSyncStatus('guest')
     },
-    [authClient, repo],
+    [authClient, repo, store, account],
   )
 
   const deleteAccount = useCallback(async () => {
@@ -2753,7 +2803,7 @@ In `AppState.tsx`, importing `emptySyncState` from `@/data/sync/types`:
 
 In `AccountScreen.tsx`, signed in, add:
 - **"Sign out"** — plain, immediate, keeps local data. Afterwards show "N rounds are still on this device."
-- **"Sign out and remove from this device"** — behind a confirmation with a "Yes, remove" button, for a borrowed phone.
+- **"Sign out and remove from this device"** — behind a confirmation with a "Yes, remove" button, for a borrowed phone. Wrap the call: if the wipe fails, say so and stay signed in. Telling someone a borrowed phone is clean when it is not is the one failure this control cannot have.
 - **"Delete my account"** — a distinct destructive section requiring the account email typed into a field labelled "Type your email to confirm" before "Permanently delete" enables. Copy must state plainly that this removes the account and its synced rounds, and that rounds on this device are kept.
 
 - [ ] **Step 4: Run tests and typecheck**
