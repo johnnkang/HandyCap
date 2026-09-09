@@ -22,4 +22,16 @@ describe('AboutScreen', () => {
     )
     expect(await screen.findByRole('button', { name: /^account$/i })).toBeInTheDocument()
   })
+
+  test('does not mention an account in the guest copy when accounts are unavailable', async () => {
+    // The button is gone (covered above), but the guest paragraph itself
+    // used to invite adding an account too — that invitation has to go with
+    // it, or the copy points at a feature the gate just removed.
+    await renderWithState(
+      <AboutScreen onClose={noop} onOpenAccount={noop} onOpenPrivacy={noop} />,
+      { accountsAvailable: false },
+    )
+    await screen.findByText(/only on this device/i)
+    expect(screen.queryByText(/account/i)).not.toBeInTheDocument()
+  })
 })
