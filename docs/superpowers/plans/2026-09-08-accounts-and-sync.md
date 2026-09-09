@@ -1822,14 +1822,26 @@ export function createSupabaseAuth(): AuthClient {
     },
 
     onChange(listener) {
-      let unsubscribe = () => {}
+      let cancelled = false
+      let unsubscribe: (() => void) | null = null
+
       void supabaseClient().then((supabase) => {
+        if (cancelled) return
         const { data } = supabase.auth.onAuthStateChange((_event, session) => {
           listener(toAccount(session?.user))
         })
         unsubscribe = () => data.subscription.unsubscribe()
       })
-      return () => unsubscribe()
+
+      return () => {
+        // The caller can unsubscribe before the client has even finished
+        // loading — React tears an effect down on the same tick it mounted, so
+        // in StrictMode this is the normal case rather than the edge one.
+        // Recording the intent means the subscription is either never created
+        // or is torn down once it is.
+        cancelled = true
+        unsubscribe?.()
+      }
     },
   }
 }
