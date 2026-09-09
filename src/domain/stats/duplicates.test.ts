@@ -50,6 +50,21 @@ describe('findProbableDuplicates', () => {
     ).toEqual([])
   })
 
+  test('does not flag a front nine and a back nine on the same day', () => {
+    expect(
+      findProbableDuplicates([
+        testRound({ id: 'front', date: '2026-05-01', totalStrokes: 44, holeCount: 9, nine: 'front' }),
+        testRound({ id: 'back', date: '2026-05-01', totalStrokes: 44, holeCount: 9, nine: 'back' }),
+      ]),
+    ).toEqual([])
+  })
+
+  test('says nothing about a part-recorded card, whose total is unknowable', () => {
+    const partial = (id: string) =>
+      testRound({ id, date: '2026-05-01', strokes: [4, 4, null, 5, 4, 4, 3, 5, 4, 4, 4, 3, 5, 4, 4, 3, 5, 4] })
+    expect(findProbableDuplicates([partial('a'), partial('b')])).toEqual([])
+  })
+
   test('finds nothing in a clean record', () => {
     expect(
       findProbableDuplicates([
