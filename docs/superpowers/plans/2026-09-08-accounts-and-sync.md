@@ -2905,13 +2905,30 @@ Mount it on `IndexScreen.tsx` below the index, following that file's existing la
 - [ ] **Step 4: Rewrite the About sheet and add the privacy policy**
 
 In `AboutScreen.tsx`, replace the on-device-only claim with an accurate description of both modes:
-- As a guest, rounds are stored only on the device and nothing is sent anywhere.
+- As a guest, rounds, scores and the Index are stored only on the device. **But
+  say the one thing that does leave it:** searching for a course sends the text
+  typed into the search box to OpenGolfAPI to look up that course's ratings.
+  No account and no identifier goes with it, and courses already used are cached
+  on the device so the app still works offline. "Nothing is sent anywhere" is
+  false and must not be written.
 - With an account, rounds sync to a server so they reach other devices; the email address and the rounds are all that is stored.
 - Deleting the account removes the account and its synced rounds.
 - Keep the existing OpenGolfAPI ODbL attribution and the "not an official handicap" statement untouched.
 - Link to the privacy screen.
 
-Create `src/ui/screens/PrivacyScreen.tsx` stating, in plain language: what is stored (email address, rounds, nothing else), that there is no advertising and no third-party analytics on the data, that guest mode sends nothing, how to delete an account and what that removes, and that data is held on Supabase as the hosting provider. Follow `AboutScreen.tsx`'s layout.
+Create `src/ui/screens/PrivacyScreen.tsx` stating, in plain language: what is
+stored (email address, rounds, nothing else); that there is no advertising and
+no third-party analytics on the data; **that course searches are sent to
+OpenGolfAPI — the one thing that leaves the device whether or not you have an
+account, carrying only the typed text**; how to delete an account and what that
+removes; and that data is held on Supabase as the hosting provider.
+
+**Verify every claim against the code before writing it.** The obvious sentence
+here — "as a guest nothing leaves your device" — is false, because
+`AppState` constructs `createOpenGolfClient()` for every user and
+`searchCourses` sends `q=<typed text>` to `api.opengolfapi.org`. A privacy
+policy that overstates is worse than none, and this is exactly the claim a
+careful reader would check first. Follow `AboutScreen.tsx`'s layout.
 
 - [ ] **Step 5: Run the full verification**
 
