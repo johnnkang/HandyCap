@@ -233,6 +233,23 @@ function RemoveFromDevice({
   onConfirm: () => Promise<void>
 }) {
   const [confirming, setConfirming] = useState(false)
+  const [removing, setRemoving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const confirm = async () => {
+    setRemoving(true)
+    setError(null)
+    try {
+      await onConfirm()
+      // On success the account becomes null and this screen swaps to the
+      // signed-out view, so there is no "after" state to reset here.
+    } catch {
+      // Telling someone a borrowed phone is clean when it is not is the one
+      // failure this control cannot have — surface it and stay signed in.
+      setError("Couldn't remove this device. Check your connection and try again.")
+      setRemoving(false)
+    }
+  }
 
   return (
     <section>
@@ -241,12 +258,21 @@ function RemoveFromDevice({
         Sign out and also erase the {roundCount} round{roundCount === 1 ? '' : 's'} on this
         device. Use this only on a phone that isn't yours to keep.
       </p>
+      {error && (
+        <p className="prose-note mb-3" role="status" style={{ color: 'var(--amber)' }}>
+          {error}
+        </p>
+      )}
       {confirming ? (
         <div className="flex gap-3">
           <button
             type="button"
             className="tap chip flex-1 py-3"
-            onClick={() => setConfirming(false)}
+            disabled={removing}
+            onClick={() => {
+              setConfirming(false)
+              setError(null)
+            }}
           >
             Cancel
           </button>
@@ -254,9 +280,10 @@ function RemoveFromDevice({
             type="button"
             className="tap flex-1 rounded-xl border py-3 text-sm"
             style={{ borderColor: 'var(--flag)', color: 'var(--flag)' }}
-            onClick={() => void onConfirm()}
+            disabled={removing}
+            onClick={() => void confirm()}
           >
-            Yes, remove
+            {removing ? 'Removing…' : 'Yes, remove'}
           </button>
         </div>
       ) : (

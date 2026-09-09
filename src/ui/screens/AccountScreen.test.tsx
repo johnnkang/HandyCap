@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'vitest'
-import { screen } from '@testing-library/react'
+import { screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { renderWithState } from '@/test/ui'
 import { createMemoryAuth } from '@/data/auth/auth'
 import { createMemoryRemote } from '@/data/sync/remote'
+import { createMemoryStore } from '@/data/repo/store'
 import { testRound } from '@/test/fixtures'
 import { AccountScreen } from './AccountScreen'
 
@@ -105,6 +106,47 @@ describe('leaving', () => {
 
     await userEvent.type(screen.getByLabelText(/type your email/i), 'golfer@example.com')
     expect(confirm).toBeEnabled()
+  })
+
+  test('signing out with a wipe lets the same account restore the device', async () => {
+    const auth = signedIn()
+    const store = createMemoryStore()
+    const remote = createMemoryRemote()
+    const { repository } = await renderWithState(<AccountScreen onClose={() => {}} />, {
+      auth,
+      store,
+      remoteFor: () => remote,
+      rounds: [testRound({ id: 'a', date: '2026-05-01', totalStrokes: 90 })],
+    })
+
+    // Let the first sync push the round up before wiping.
+    await screen.findByText('golfer@example.com')
+    await userEvent.click(await screen.findByRole('button', { name: /remove.*this device/i }))
+    await userEvent.click(await screen.findByRole('button', { name: /yes, remove/i }))
+    expect(await repository.loadRounds()).toEqual([])
+
+    // The cursors must not survive the wipe, or signing back in pulls nothing
+    // and the record never returns.
+    expect(await store.get('handycap:cursors:acct-1')).toBeUndefined()
+    expect(await store.get('handycap:adopted:acct-1')).toBeUndefined()
+  })
+
+  test('deleting the account removes the rows from the server', async () => {
+    const auth = signedIn()
+    const remote = createMemoryRemote()
+    await renderWithState(<AccountScreen onClose={() => {}} />, {
+      auth,
+      remoteFor: () => remote,
+      rounds: [testRound({ id: 'a', date: '2026-05-01', totalStrokes: 90 })],
+    })
+
+    await screen.findByText('golfer@example.com')
+    await userEvent.click(await screen.findByRole('button', { name: /delete my account/i }))
+    await userEvent.type(screen.getByLabelText(/type your email/i), 'golfer@example.com')
+    await userEvent.click(screen.getByRole('button', { name: /permanently delete/i }))
+
+    // Not just the UI: the account's rows are actually gone.
+    await waitFor(async () => expect(await remote.pull(undefined)).toEqual([]))
   })
 
   test('deleting the account leaves the local rounds alone', async () => {

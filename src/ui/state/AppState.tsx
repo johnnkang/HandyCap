@@ -235,14 +235,23 @@ export function AppProvider({
 
   const signOut = useCallback(
     async ({ wipeLocal }: { wipeLocal: boolean }) => {
-      await authClient.signOut()
-      if (wipeLocal) {
+      if (wipeLocal && account) {
+        // Wipe first, so a failure is reported while the user is still in a
+        // state they recognise rather than after the screen has flipped to
+        // signed-out and told them the device is clean.
         await repo.replaceState(emptySyncState())
         setRounds([])
+        // The cursors describe a record this device no longer holds. Left
+        // behind, signing back in would pull nothing — every row on the server
+        // sits below the stored high-water mark — and the golfer would open an
+        // empty app that looks exactly like their history was destroyed.
+        await store.remove(cursorKey(account.id))
+        await store.remove(adoptedKey(account.id))
       }
+      await authClient.signOut()
       setSyncStatus('guest')
     },
-    [authClient, repo],
+    [authClient, repo, store, account],
   )
 
   const deleteAccount = useCallback(async () => {
