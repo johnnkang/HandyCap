@@ -15,8 +15,8 @@ best and worst, and the Par 3/4/5 strengths analysis.
 
 ## In flight: optional accounts and sync
 
-Branch `accounts-and-sync`, 37 commits, **324 tests**, typecheck clean, build
-green, working tree clean. Never pushed.
+Branch `accounts-and-sync`, **336 tests**, typecheck clean, build green. Pushed
+to GitHub but **not merged** — `main` still deploys the guest-only app.
 
 Guest mode stays the default and stays offline. An account is optional and gives
 true two-way sync: post a round on your phone, it is on your iPad. Conflicts
@@ -29,17 +29,27 @@ Plan: `docs/superpowers/plans/2026-09-08-accounts-and-sync.md`
 Progress ledger, including every ruling made along the way:
 `.superpowers/sdd/2026-09-08-accounts-and-sync/progress.md`
 
-**Before this can merge:**
+Reviewed throughout: every task passed its own review, and a final
+whole-branch review found two concurrency defects at the seam where sync
+writes and user writes meet — a save landing mid-sync could be destroyed, and
+a sync in flight could resurrect a wiped device. Both are fixed and pinned by
+tests that fail without them.
 
-1. A final whole-branch review, plus a scoped re-review of the last commit
-   (`c2c1c94`, the privacy-screen correction) — that one fix landed but was
-   never reviewed.
-2. **Needs you:** create the Supabase project, run `supabase/schema.sql`, enable
-   email magic links, add redirect URLs for `localhost:5173` and
-   `handycap-psi.vercel.app`, and set `VITE_SUPABASE_URL` /
-   `VITE_SUPABASE_ANON_KEY` in `.env.local` and in Vercel. Nothing in the test
-   suite needs this; the app runs guest-only without it.
-3. A manual two-browser check once step 2 is done.
+**Without Supabase credentials the account surface is absent entirely** — the
+app is exactly the guest-only calculator it is today, not a feature with dead
+buttons. That gate is tested in both directions.
+
+**Before this can merge — needs you:**
+
+1. Create the Supabase project, run `supabase/schema.sql`, enable email magic
+   links, add redirect URLs for `localhost:5173` and `handycap-psi.vercel.app`,
+   and set `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` in `.env.local` and
+   in Vercel.
+2. A manual two-browser check: post a round in one, confirm it appears in the
+   other; delete it in one, confirm it stays deleted.
+
+Merging auto-deploys to production, so do those first. Nothing in the test
+suite depends on either.
 
 Passkeys and email+password are Part 2 and are not built. Magic link alone is a
 complete product, which is why the plan stops here.
