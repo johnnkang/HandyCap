@@ -1,10 +1,13 @@
 import { describe, expect, test } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { renderWithState } from '@/test/ui'
 import { useAppState } from './AppState'
 import { scoresOfBogey, testRound } from '@/test/fixtures'
 import type { Round } from '@/domain/whs/types'
+import { createMemoryAuth } from '@/data/auth/auth'
+import { createMemoryRemote } from '@/data/sync/remote'
+import { createMemoryStore } from '@/data/repo/store'
 
 /** Renders the state the rest of the app reads, so assertions stay on behaviour. */
 function Probe({ toAdd }: { toAdd?: Round } = {}) {
@@ -92,5 +95,71 @@ describe('AppProvider', () => {
     // A component rendered outside the provider would otherwise read undefined
     // state and show a wrong handicap, which is the worst possible failure here.
     expect(() => render(<Probe />)).toThrow(/must be used inside an AppProvider/)
+  })
+})
+
+/** Surfaces the account and sync fields the account screen reads. */
+function AccountProbe() {
+  const { rounds, account, syncStatus, loading } = useAppState()
+  if (loading) return <p>loading</p>
+  return (
+    <div>
+      <p data-testid="rounds">{rounds.length}</p>
+      <p data-testid="account">{account?.email ?? 'guest'}</p>
+      <p data-testid="status">{syncStatus}</p>
+    </div>
+  )
+}
+
+describe('account and sync', () => {
+  test('is a guest until signed in, and still fully usable', async () => {
+    await renderWithState(<AccountProbe />, { rounds: [bogeyRound('a', '2026-05-01')] })
+    expect(await screen.findByTestId('account')).toHaveTextContent('guest')
+    expect(screen.getByTestId('status')).toHaveTextContent('guest')
+    expect(screen.getByTestId('rounds')).toHaveTextContent('1')
+  })
+
+  test('pulls the account record on sign-in', async () => {
+    const remote = createMemoryRemote([
+      {
+        roundId: 'b',
+        payload: bogeyRound('b', '2026-05-02'),
+        updatedAt: '2026-05-02T00:00:00.000Z',
+        deletedAt: null,
+      },
+    ])
+    const auth = createMemoryAuth({ account: { id: 'acct-1', email: 'golfer@example.com' } })
+
+    await renderWithState(<AccountProbe />, {
+      auth,
+      store: createMemoryStore(),
+      remoteFor: () => remote,
+    })
+
+    expect(await screen.findByTestId('account')).toHaveTextContent('golfer@example.com')
+    await waitFor(() => expect(screen.getByTestId('rounds')).toHaveTextContent('1'))
+  })
+
+  test('a sync failure never breaks the app', async () => {
+    const auth = createMemoryAuth({ account: { id: 'acct-1', email: 'golfer@example.com' } })
+
+    await renderWithState(<AccountProbe />, {
+      auth,
+      store: createMemoryStore(),
+      rounds: [bogeyRound('a', '2026-05-01')],
+      remoteFor: () => ({
+        pull: async () => {
+          throw new Error('offline')
+        },
+        push: async () => {},
+        deleteEverything: async () => {},
+      }),
+    })
+
+    await waitFor(() =>
+      expect(screen.getByTestId('status').textContent).toMatch(/offline|error/),
+    )
+    // The record is untouched by the failure.
+    expect(screen.getByTestId('rounds')).toHaveTextContent('1')
   })
 })
