@@ -5,7 +5,7 @@ import { renderWithState } from '@/test/ui'
 import { useAppState } from './AppState'
 import { scoresOfBogey, testRound } from '@/test/fixtures'
 import type { Round } from '@/domain/whs/types'
-import { createMemoryAuth, type AuthClient } from '@/data/auth/auth'
+import { createMemoryAuth, type Account, type AuthClient } from '@/data/auth/auth'
 import { createMemoryRemote, type RemoteStore } from '@/data/sync/remote'
 import { createMemoryStore, type KeyValueStore } from '@/data/repo/store'
 import { createRepository, type Repository } from '@/data/repo/repository'
@@ -254,7 +254,12 @@ function SyncProbe() {
       <button type="button" onClick={() => void syncNow()}>
         sync again
       </button>
-      <button type="button" onClick={() => void signOut({ wipeLocal: true })}>
+      <button
+        type="button"
+        onClick={() => {
+          void signOut({ wipeLocal: true }).catch(() => {})
+        }}
+      >
         wipe
       </button>
       <button type="button" onClick={() => void undoAdoption()}>
@@ -381,6 +386,99 @@ describe('concurrent whole-record writes', () => {
 
     expect(await repository.loadRounds()).toEqual([])
     expect(await store.get('handycap:cursors:acct-1')).toBeUndefined()
+  })
+
+  test('a wipe whose sign-out fails does not silently stop syncing forever', async () => {
+    const user = userEvent.setup()
+    const auth = signedIn()
+    // Supabase's client is a dynamic import, so signing out offline with that
+    // chunk uncached rejects. The device is then still signed in and staying.
+    const failing: AuthClient = {
+      ...auth,
+      async signOut() {
+        throw new Error('offline')
+      },
+    }
+
+    await renderWithState(<SyncProbe />, {
+      store: createMemoryStore(),
+      auth: failing,
+      rounds: [bogeyRound('a', '2026-05-01')],
+      remoteFor: () =>
+        createMemoryRemote([
+          {
+            roundId: 'b',
+            payload: bogeyRound('b', '2026-05-02'),
+            updatedAt: '2026-05-02T00:00:00.000Z',
+            deletedAt: null,
+          },
+        ]),
+    })
+
+    await waitFor(() => expect(screen.getByTestId('rounds')).toHaveTextContent('2'))
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('idle'))
+
+    await user.click(screen.getByRole('button', { name: 'wipe' }))
+    await waitFor(() => expect(screen.getByTestId('rounds')).toHaveTextContent('0'))
+    // Still signed in: the sign-out never happened.
+    expect(screen.getByTestId('account')).toHaveTextContent('golfer@example.com')
+
+    // So sync has to still work. A latch left set here would stop it for the
+    // life of the provider while the screen still says everything is backed up.
+    await user.click(screen.getByRole('button', { name: 'sync again' }))
+    await waitFor(() => expect(screen.getByTestId('rounds')).toHaveTextContent('2'))
+  })
+
+  test('a token refresh for the same account does not resync', async () => {
+    // `createMemoryAuth` only announces on a real sign-in or sign-out, and the
+    // event under test is neither — so this is a purpose-built fake rather than
+    // a contortion of that one.
+    const account: Account = { id: 'acct-1', email: 'golfer@example.com' }
+    const listeners = new Set<(next: Account | null) => void>()
+    const auth: AuthClient = {
+      async currentAccount() {
+        return { ...account }
+      },
+      async sendMagicLink() {},
+      async completeSignIn() {
+        return null
+      },
+      async signOut() {},
+      async deleteAccount() {},
+      onChange(listener) {
+        listeners.add(listener)
+        return () => listeners.delete(listener)
+      },
+    }
+
+    let pulls = 0
+    const inner = createMemoryRemote()
+    const remote: RemoteStore = {
+      ...inner,
+      async pull(since) {
+        pulls += 1
+        return inner.pull(since)
+      },
+    }
+
+    await renderWithState(<SyncProbe />, {
+      store: createMemoryStore(),
+      auth,
+      rounds: [bogeyRound('a', '2026-05-01')],
+      remoteFor: () => remote,
+    })
+
+    await waitFor(() => expect(pulls).toBe(1))
+
+    // What Supabase does on a token refresh: forward the session again as a
+    // fresh object carrying the same id. Nothing about this device's
+    // relationship with the account has changed.
+    await act(async () => {
+      listeners.forEach((listener) => listener({ ...account }))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    expect(pulls).toBe(1)
   })
 
   test('a second syncNow started mid-sync cannot spoil the undo snapshot', async () => {

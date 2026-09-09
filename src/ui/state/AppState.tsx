@@ -156,12 +156,15 @@ export function AppProvider({
   // Adopt whatever session already exists, then follow it.
   useEffect(() => {
     let cancelled = false
-    void authClient.currentAccount().then((existing) => {
-      if (!cancelled) setAccount(existing)
-    })
-    const unsubscribe = authClient.onChange((next) => {
-      if (!cancelled) setAccount(next)
-    })
+    // Same id, same session. The auth client builds a fresh object for every
+    // event it forwards — a token refresh among them — and taking each one at
+    // face value would rebuild the controller, resync, and release the
+    // sign-out latch in the middle of a wipe.
+    const adopt = (next: Account | null) => {
+      if (!cancelled) setAccount((prev) => (prev?.id === next?.id ? prev : next))
+    }
+    void authClient.currentAccount().then(adopt)
+    const unsubscribe = authClient.onChange(adopt)
     return () => {
       cancelled = true
       unsubscribe()
@@ -206,6 +209,27 @@ export function AppProvider({
    * wipe waits on a network sign-out, and "Sync now" stays tappable throughout.
    */
   const leaving = useRef(false)
+
+  /**
+   * Release the latch when the sign-out that set it did not happen.
+   *
+   * Deliberately not a `finally`. Between `signOut()` resolving and React
+   * committing `account = null` the closure is still live, and releasing there
+   * would reopen the window the latch exists to close — so the controller
+   * effect owns the success path. This is only the failure path: still signed
+   * in, staying put, and a latch left set would silently stop syncing for the
+   * life of the provider while the screen still says everything is backed up.
+   * `signOut` can genuinely fail — the Supabase client is a dynamic import, so
+   * signing out offline with that chunk uncached rejects.
+   */
+  const releaseIfStaying = useCallback(async () => {
+    try {
+      if (await authClient.currentAccount()) leaving.current = false
+    } catch {
+      // Cannot tell which side of the sign-out we are on. Leave it latched:
+      // an unnecessarily quiet sync is the better failure of the two.
+    }
+  }, [authClient])
 
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const cancelPendingSync = useCallback(() => {
@@ -270,22 +294,31 @@ export function AppProvider({
     cancelPendingSync()
     leaving.current = true
     await serialise(async () => {
-      const snapshot = await takeUndoSnapshot(store)
-      if (!snapshot) return
-      await repo.replaceState(snapshot)
-      setRounds(await repo.loadRounds())
-      // Clear this device's memory of the merge, so a later sign-in to the same
-      // account adopts cleanly rather than resuming from a cursor already past
-      // the record it is trying to re-adopt.
-      await store.remove(adoptedKey(account.id))
-      await store.remove(cursorKey(account.id))
-      setAdoption(null)
-      // The only way this is genuinely reversible: the rounds already pushed to
-      // the account are not un-pushed, so staying signed in would just pull the
-      // merged record straight back on the next sync.
-      await authClient.signOut()
+      try {
+        const snapshot = await takeUndoSnapshot(store)
+        // Nothing to undo, so this device is not going anywhere after all.
+        if (!snapshot) {
+          leaving.current = false
+          return
+        }
+        await repo.replaceState(snapshot)
+        setRounds(await repo.loadRounds())
+        // Clear this device's memory of the merge, so a later sign-in to the
+        // same account adopts cleanly rather than resuming from a cursor
+        // already past the record it is trying to re-adopt.
+        await store.remove(adoptedKey(account.id))
+        await store.remove(cursorKey(account.id))
+        setAdoption(null)
+        // The only way this is genuinely reversible: the rounds already pushed
+        // to the account are not un-pushed, so staying signed in would just
+        // pull the merged record straight back on the next sync.
+        await authClient.signOut()
+      } catch (cause) {
+        await releaseIfStaying()
+        throw cause
+      }
     })
-  }, [store, repo, account, authClient, serialise, cancelPendingSync])
+  }, [store, repo, account, authClient, serialise, cancelPendingSync, releaseIfStaying])
 
   const dismissAdoption = useCallback(() => {
     void clearUndoSnapshot(store)
@@ -299,28 +332,34 @@ export function AppProvider({
       cancelPendingSync()
       leaving.current = true
       await serialise(async () => {
-        if (wipeLocal && account) {
-          // Wipe first, so a failure is reported while the user is still in a
-          // state they recognise rather than after the screen has flipped to
-          // signed-out and told them the device is clean.
-          await repo.replaceState(emptySyncState())
-          setRounds([])
-          // The cursors describe a record this device no longer holds. Left
-          // behind, signing back in would pull nothing — every row on the server
-          // sits below the stored high-water mark — and the golfer would open an
-          // empty app that looks exactly like their history was destroyed.
-          await store.remove(cursorKey(account.id))
-          await store.remove(adoptedKey(account.id))
-          // The undo snapshot is a second, complete copy of the rounds, kept
-          // until the golfer taps "Looks right" — which many never will.
-          // "Remove from this device" has to mean that copy too.
-          await clearUndoSnapshot(store)
+        try {
+          if (wipeLocal && account) {
+            // Wipe first, so a failure is reported while the user is still in a
+            // state they recognise rather than after the screen has flipped to
+            // signed-out and told them the device is clean.
+            await repo.replaceState(emptySyncState())
+            setRounds([])
+            // The cursors describe a record this device no longer holds. Left
+            // behind, signing back in would pull nothing — every row on the
+            // server sits below the stored high-water mark — and the golfer
+            // would open an empty app that looks exactly like their history was
+            // destroyed.
+            await store.remove(cursorKey(account.id))
+            await store.remove(adoptedKey(account.id))
+            // The undo snapshot is a second, complete copy of the rounds, kept
+            // until the golfer taps "Looks right" — which many never will.
+            // "Remove from this device" has to mean that copy too.
+            await clearUndoSnapshot(store)
+          }
+          await authClient.signOut()
+          setSyncStatus('guest')
+        } catch (cause) {
+          await releaseIfStaying()
+          throw cause
         }
-        await authClient.signOut()
-        setSyncStatus('guest')
       })
     },
-    [authClient, repo, store, account, serialise, cancelPendingSync],
+    [authClient, repo, store, account, serialise, cancelPendingSync, releaseIfStaying],
   )
 
   const deleteAccount = useCallback(async () => {
