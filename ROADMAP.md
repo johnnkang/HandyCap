@@ -1,16 +1,50 @@
 # Where HandyCap stands
 
-Last updated 2026-09-07.
+Last updated 2026-09-09.
 
-All three planned phases are complete, deployed, and green: **155 tests**,
-typecheck clean, production build passing. Live at
+`main` is deployed and green. A feature branch, **`accounts-and-sync`**, adds
+optional accounts and cross-device sync and is finished but **not yet merged or
+pushed** — see "In flight" below.
+
+On `main`: **241 tests**, typecheck clean, production build passing. Live at
 https://handycap-psi.vercel.app
 
 Everything in the original brief is built — per-course handicap, an overall index
 across courses, forecasting from recent scores, full score history with average,
 best and worst, and the Par 3/4/5 strengths analysis.
 
-## Pick up here
+## In flight: optional accounts and sync
+
+Branch `accounts-and-sync`, 37 commits, **324 tests**, typecheck clean, build
+green, working tree clean. Never pushed.
+
+Guest mode stays the default and stays offline. An account is optional and gives
+true two-way sync: post a round on your phone, it is on your iPad. Conflicts
+resolve by last-write-wins per round with tombstones for deletions, proven
+convergent by property tests and by two simulated devices sharing one fake
+remote.
+
+Design: `docs/superpowers/specs/2026-09-08-optional-accounts-and-sync-design.md`
+Plan: `docs/superpowers/plans/2026-09-08-accounts-and-sync.md`
+Progress ledger, including every ruling made along the way:
+`.superpowers/sdd/2026-09-08-accounts-and-sync/progress.md`
+
+**Before this can merge:**
+
+1. A final whole-branch review, plus a scoped re-review of the last commit
+   (`c2c1c94`, the privacy-screen correction) — that one fix landed but was
+   never reviewed.
+2. **Needs you:** create the Supabase project, run `supabase/schema.sql`, enable
+   email magic links, add redirect URLs for `localhost:5173` and
+   `handycap-psi.vercel.app`, and set `VITE_SUPABASE_URL` /
+   `VITE_SUPABASE_ANON_KEY` in `.env.local` and in Vercel. Nothing in the test
+   suite needs this; the app runs guest-only without it.
+3. A manual two-browser check once step 2 is done.
+
+Passkeys and email+password are Part 2 and are not built. Magic link alone is a
+complete product, which is why the plan stops here.
+
+## Pick up here (on `main`)
 
 **1. Check it against a real GHIN index.** Still the most valuable thing left and
 the one thing the test suite cannot do — every other test asserts the engine
@@ -50,8 +84,8 @@ deliberate approximations described under "Known limits".
   fixed it and the CLI then reported the repo already connected. Pushes to `main`
   deploy on their own — `npx vercel --prod` is no longer needed.
 - **UI component tests.** The app state, index screen, rounds screen, posting
-  flow, record strip and explanation disclosures are covered — 196 tests, up
-  from 155. The posting tests were mutation-checked: breaking the save and
+  flow, record strip and explanation disclosures are covered — 241 tests on
+  `main`, up from 155. The posting tests were mutation-checked: breaking the save and
   skewing the differential preview each failed exactly one test.
 - **GitHub MCP works.** A fine-grained PAT in `~/.claude/settings.json` plus a
   full Claude Code restart; the tools authenticate as `johnnkang`.
