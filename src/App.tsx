@@ -7,6 +7,7 @@ import { ForecastScreen } from './ui/screens/ForecastScreen'
 import { PostRoundScreen } from './ui/screens/PostRoundScreen'
 import { AboutScreen, useStoredTheme } from './ui/screens/AboutScreen'
 import { AccountScreen } from './ui/screens/AccountScreen'
+import { MergeSummary } from './ui/components/MergeSummary'
 
 type Tab = 'index' | 'rounds' | 'insights' | 'forecast'
 
@@ -82,6 +83,8 @@ function Shell() {
         />
       )}
       {showAccount && <AccountScreen onClose={() => setShowAccount(false)} />}
+
+      <MergeSummary />
 
       {tab === 'index' && <IndexScreen />}
       {tab === 'rounds' && <RoundsScreen />}

@@ -163,3 +163,46 @@ describe('account and sync', () => {
     expect(screen.getByTestId('rounds')).toHaveTextContent('1')
   })
 })
+
+/** Surfaces the adoption summary the merge-summary card is built from. */
+function AdoptionProbe() {
+  const { adoption, account, loading } = useAppState()
+  if (loading) return <p>loading</p>
+  return (
+    <div>
+      <p data-testid="account">{account?.email ?? 'guest'}</p>
+      <p data-testid="adoption">{adoption ? JSON.stringify(adoption) : 'none'}</p>
+    </div>
+  )
+}
+
+describe('adoption summary', () => {
+  test('a guest never carries a summary left over from a signed-out session', async () => {
+    const auth = createMemoryAuth({ account: { id: 'acct-1', email: 'golfer@example.com' } })
+    const remote = createMemoryRemote([
+      {
+        roundId: 'b',
+        payload: bogeyRound('b', '2026-05-02'),
+        updatedAt: '2026-05-02T00:00:00.000Z',
+        deletedAt: null,
+      },
+    ])
+
+    await renderWithState(<AdoptionProbe />, {
+      auth,
+      store: createMemoryStore(),
+      rounds: [bogeyRound('a', '2026-05-01')],
+      remoteFor: () => remote,
+    })
+
+    // The first sync for this sign-in merged an unfamiliar round in, so it
+    // produced a summary.
+    await waitFor(() => expect(screen.getByTestId('adoption')).not.toHaveTextContent('none'))
+
+    await auth.signOut()
+
+    // Signing out must not leave the card behind for the next guest session.
+    await waitFor(() => expect(screen.getByTestId('account')).toHaveTextContent('guest'))
+    expect(screen.getByTestId('adoption')).toHaveTextContent('none')
+  })
+})
