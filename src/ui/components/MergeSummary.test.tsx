@@ -102,6 +102,38 @@ describe('MergeSummary', () => {
     expect(screen.getByText(/you now have 3/i)).toBeInTheDocument()
   })
 
+  test('flags two rounds that look posted twice after a merge', async () => {
+    // Same date, same fixture course and tee, same bogey score — the classic
+    // shape of the same round entered once per device.
+    const remote = createMemoryRemote([remoteRound('x1', '2026-04-01')])
+    const auth = createMemoryAuth({ account: { id: 'acct-1', email: 'golfer@example.com' } })
+
+    await renderWithState(<MergeSummary />, {
+      auth,
+      remoteFor: () => remote,
+      store: createMemoryStore(),
+      rounds: [round('a', '2026-04-01')],
+    })
+
+    expect(await screen.findByText(/your account had/i)).toBeInTheDocument()
+    expect(screen.getByText(/posted twice/i)).toBeInTheDocument()
+  })
+
+  test('says nothing about duplicates for a clean record', async () => {
+    const remote = createMemoryRemote([remoteRound('x1', '2026-04-01')])
+    const auth = createMemoryAuth({ account: { id: 'acct-1', email: 'golfer@example.com' } })
+
+    await renderWithState(<MergeSummary />, {
+      auth,
+      remoteFor: () => remote,
+      store: createMemoryStore(),
+      rounds: [round('a', '2026-05-01')],
+    })
+
+    expect(await screen.findByText(/your account had/i)).toBeInTheDocument()
+    expect(screen.queryByText(/posted twice/i)).not.toBeInTheDocument()
+  })
+
   test('the undo action restores the pre-merge round count and leaves the user signed out', async () => {
     const user = userEvent.setup()
     const remote = createMemoryRemote([

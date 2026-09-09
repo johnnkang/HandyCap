@@ -1,3 +1,4 @@
+import { findProbableDuplicates } from '@/domain/stats/duplicates'
 import { useAppState } from '@/ui/state/AppState'
 
 /**
@@ -8,13 +9,18 @@ import { useAppState } from '@/ui/state/AppState'
  * is to say what happened in plain English and offer a way back out.
  */
 export function MergeSummary() {
-  const { adoption, undoAdoption, dismissAdoption } = useAppState()
+  const { adoption, undoAdoption, dismissAdoption, rounds } = useAppState()
 
   if (!adoption) return null
   // Nothing to reconcile: device and account agreed, whether because both
   // were empty or because the device already held everything the account
   // has. Nothing moved, so there is nothing to say.
   if (adoption.total === 0) return null
+
+  // Merging two devices' local ids is exactly when the same real round can
+  // end up posted twice under different ids. Detection only — this points at
+  // the rounds screen and lets the golfer decide; it never deletes anything.
+  const duplicates = findProbableDuplicates(rounds)
 
   return (
     <section className="panel relative mx-4 mt-4 p-4" role="status">
@@ -23,6 +29,12 @@ export function MergeSummary() {
         Your account had {roundsPhrase(adoption.fromAccount)}. This device added{' '}
         {roundsPhrase(adoption.onDevice)}. You now have {adoption.total}.
       </p>
+      {duplicates.length > 0 && (
+        <p className="prose-note mt-2">
+          Two rounds look like the same round posted twice. Open the Rounds tab and remove the
+          one you don't want.
+        </p>
+      )}
       <div className="mt-3 flex gap-3">
         <button
           type="button"
