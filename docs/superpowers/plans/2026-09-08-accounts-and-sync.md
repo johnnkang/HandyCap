@@ -2532,6 +2532,21 @@ describe('findProbableDuplicates', () => {
     ).toEqual([])
   })
 
+  test('does not flag a front nine and a back nine on the same day', () => {
+    expect(
+      findProbableDuplicates([
+        testRound({ id: 'front', date: '2026-05-01', totalStrokes: 44, holeCount: 9, nine: 'front' }),
+        testRound({ id: 'back', date: '2026-05-01', totalStrokes: 44, holeCount: 9, nine: 'back' }),
+      ]),
+    ).toEqual([])
+  })
+
+  test('says nothing about a part-recorded card, whose total is unknowable', () => {
+    const partial = (id: string) =>
+      testRound({ id, date: '2026-05-01', strokes: [4, 4, null, 5, 4, 4, 3, 5, 4, 4, 4, 3, 5, 4, 4, 3, 5, 4] })
+    expect(findProbableDuplicates([partial('a'), partial('b')])).toEqual([])
+  })
+
   test('finds nothing in a clean record', () => {
     expect(
       findProbableDuplicates([
@@ -2560,18 +2575,25 @@ export interface DuplicatePair {
   other: Round
 }
 
-/** Gross strokes, however the round recorded them. */
-const strokesOf = (round: Round): number | null =>
-  round.totalStrokes ??
-  (round.holeScores.length > 0
-    ? round.holeScores.reduce((total, hole) => total + (hole.strokes ?? 0), 0)
-    : null)
+/** Gross strokes, however the round recorded them, or null if unknowable. */
+const strokesOf = (round: Round): number | null => {
+  if (round.totalStrokes !== null) return round.totalStrokes
+  if (round.holeScores.length === 0) return null
+  // A part-recorded card has no meaningful gross total. Summing it with the
+  // gaps counted as zero would undercount, and an undercount can collide with
+  // an unrelated round — which would accuse a golfer of double posting. Say
+  // nothing instead.
+  if (round.holeScores.some((hole) => hole.strokes === null)) return null
+  return round.holeScores.reduce((total, hole) => total + (hole.strokes ?? 0), 0)
+}
 
 /**
  * Rounds that look like the same round entered twice.
  *
- * Same course, same tee, same date, same gross score, different ids. The tee is
- * part of the key so a genuine 36-hole day from different tees is not flagged.
+ * Same course, same tee, same nine, same date, same gross score, different ids.
+ * The tee and the nine are both part of the key because both distinguish
+ * ordinary golf from a double post: 36 holes from different tees is a real
+ * day's play, and so is a front nine and a back nine on the same afternoon.
  *
  * Detection only. Deleting a round is always the golfer's decision — a wrong
  * guess here would silently change someone's Handicap Index.
@@ -2584,7 +2606,14 @@ export function findProbableDuplicates(rounds: Round[]): DuplicatePair[] {
     const strokes = strokesOf(round)
     if (strokes === null) continue
 
-    const key = [round.date, round.course.id, round.course.tee.key, round.holeCount, strokes].join('|')
+    const key = [
+      round.date,
+      round.course.id,
+      round.course.tee.key,
+      round.holeCount,
+      round.nine ?? '',
+      strokes,
+    ].join('|')
     const held = seen.get(key)
     if (held) pairs.push({ kept: held, other: round })
     else seen.set(key, round)
