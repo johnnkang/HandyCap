@@ -43,11 +43,13 @@ export function useStoredTheme(): [ThemeChoice, (choice: ThemeChoice) => void] {
 export function AboutScreen({
   onClose,
   onOpenAccount,
+  onOpenPrivacy,
 }: {
   onClose: () => void
   onOpenAccount: () => void
+  onOpenPrivacy: () => void
 }) {
-  const { repository, reload, rounds } = useAppState()
+  const { repository, reload, rounds, account } = useAppState()
   const [theme, setTheme] = useStoredTheme()
   const [status, setStatus] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -114,10 +116,27 @@ export function AboutScreen({
 
         <section>
           <p className="label mb-2">Your data</p>
-          <p className="prose-note mb-3">
-            Everything lives on this device. Nothing is uploaded, and there is no account.
-            That also means a lost phone is a lost record — export a backup now and then.
-          </p>
+          {account ? (
+            <p className="prose-note mb-3">
+              You're signed in, so your rounds sync to a server and reach your other devices.
+              The only things stored there are your email address and your rounds. Deleting
+              your account removes both the account and everything it synced.
+            </p>
+          ) : (
+            <p className="prose-note mb-3">
+              As a guest, everything lives on this device and nothing is sent anywhere. That
+              also means a lost phone is a lost record — export a backup now and then, or add
+              an account to sync your rounds to a server and keep them on other devices too.
+            </p>
+          )}
+          <button
+            type="button"
+            className="tap prose-note mb-3 cursor-pointer underline"
+            style={{ color: 'var(--ink-dim)' }}
+            onClick={onOpenPrivacy}
+          >
+            Read the privacy policy
+          </button>
           <div className="flex gap-3">
             <button type="button" className="tap chip flex-1 py-3" onClick={exportData}>
               Export {rounds.length} round{rounds.length === 1 ? '' : 's'}

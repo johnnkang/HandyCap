@@ -6,9 +6,10 @@ import { CourseHandicapCard } from '../components/CourseHandicapCard'
 import { Explain } from '../components/Explain'
 import { IndexChangeCard } from '../components/IndexChangeCard'
 import { MovementTimeline } from '../components/MovementTimeline'
+import { BackupNudge } from '../components/BackupNudge'
 import { useAppState } from '../state/AppState'
 
-export function IndexScreen() {
+export function IndexScreen({ onOpenAccount = () => {} }: { onOpenAccount?: () => void }) {
   const { record, rounds, loading } = useAppState()
   const [showHistory, setShowHistory] = useState(false)
 
@@ -45,6 +46,8 @@ export function IndexScreen() {
           </span>
         </p>
       </section>
+
+      <BackupNudge onOpenAccount={onOpenAccount} />
 
       {/*
         Only when there is something to attribute. A retrospective with no

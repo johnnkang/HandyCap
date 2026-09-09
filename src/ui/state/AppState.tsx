@@ -47,6 +47,12 @@ interface AppState {
   /** Re-read everything from storage, after an import replaces the record. */
   reload: () => Promise<void>
   repository: Repository
+  /**
+   * The same injectable key/value store backing sync cursors and the undo
+   * snapshot, exposed so a small persisted UI flag — the backup nudge's
+   * dismissal — does not need its own dedicated AppState method.
+   */
+  store: KeyValueStore
   courses: OpenGolfClient
   courseCache: CourseCache
   account: Account | null
@@ -334,6 +340,7 @@ export function AppProvider({
       deleteRound,
       reload,
       repository: repo,
+      store,
       courses: client,
       courseCache: cache,
       account,
@@ -354,6 +361,7 @@ export function AppProvider({
       deleteRound,
       reload,
       repo,
+      store,
       client,
       cache,
       account,

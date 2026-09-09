@@ -7,6 +7,7 @@ import { ForecastScreen } from './ui/screens/ForecastScreen'
 import { PostRoundScreen } from './ui/screens/PostRoundScreen'
 import { AboutScreen, useStoredTheme } from './ui/screens/AboutScreen'
 import { AccountScreen } from './ui/screens/AccountScreen'
+import { PrivacyScreen } from './ui/screens/PrivacyScreen'
 import { MergeSummary } from './ui/components/MergeSummary'
 
 type Tab = 'index' | 'rounds' | 'insights' | 'forecast'
@@ -34,6 +35,7 @@ function Shell() {
   const [posting, setPosting] = useState(false)
   const [showAbout, setShowAbout] = useState(false)
   const [showAccount, setShowAccount] = useState(false)
+  const [showPrivacy, setShowPrivacy] = useState(false)
 
   // Restores the saved appearance choice on load.
   useStoredTheme()
@@ -80,13 +82,15 @@ function Shell() {
         <AboutScreen
           onClose={() => setShowAbout(false)}
           onOpenAccount={() => setShowAccount(true)}
+          onOpenPrivacy={() => setShowPrivacy(true)}
         />
       )}
       {showAccount && <AccountScreen onClose={() => setShowAccount(false)} />}
+      {showPrivacy && <PrivacyScreen onClose={() => setShowPrivacy(false)} />}
 
       <MergeSummary />
 
-      {tab === 'index' && <IndexScreen />}
+      {tab === 'index' && <IndexScreen onOpenAccount={() => setShowAccount(true)} />}
       {tab === 'rounds' && <RoundsScreen />}
       {tab === 'insights' && <InsightsScreen />}
       {tab === 'forecast' && <ForecastScreen />}
