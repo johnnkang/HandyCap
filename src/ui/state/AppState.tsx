@@ -181,58 +181,109 @@ export function AppProvider({
     [account, repo, store, makeRemote],
   )
 
+  // Every operation that rewrites the whole record goes through one chain.
+  // A sync, a wipe and an undo each replace the entire local state, so
+  // interleaving any two of them means one silently discards the other.
+  const chain = useRef<Promise<unknown>>(Promise.resolve())
+  const serialise = useCallback(<T,>(work: () => Promise<T>): Promise<T> => {
+    const next = chain.current.then(work, work)
+    chain.current = next.catch(() => {})
+    return next
+  }, [])
+
+  /** True from the moment a sync joins the chain until it has finished. */
+  const syncing = useRef(false)
+
+  /**
+   * Bumped by anything that ends this device's relationship with the account.
+   *
+   * Serialising alone is not enough. It stops a sync landing *after* a wipe,
+   * but a sync triggered while the wipe is still on the chain would queue
+   * behind it and then write the merged record straight back — the same
+   * borrowed phone full of someone else's rounds that the wipe exists to
+   * prevent, reached from the other side.
+   */
+  const era = useRef(0)
+
+  const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cancelPendingSync = useCallback(() => {
+    if (syncTimer.current) clearTimeout(syncTimer.current)
+    syncTimer.current = null
+  }, [])
+
   const syncNow = useCallback(async () => {
     if (!controller || !account) {
       setSyncStatus('guest')
       return
     }
+    // Skip rather than queue. Mount, focus, regaining the network, the
+    // post-save debounce and the manual button all arrive here, and a second
+    // sync behind the first would only redo work the first is already doing,
+    // while a backlog of them holds up a wipe or an undo waiting on the chain.
+    if (syncing.current) return
+    syncing.current = true
+    const startedIn = era.current
     setSyncStatus('syncing')
     try {
-      // Adoption happens once per account per device, ever — guarded by a
-      // marker persisted in `store`, not by anything that resets on mount.
-      // Every sync after that marker is set (on focus, regaining the
-      // network, after a save, or on a later cold start) just synchronises
-      // and must not touch the undo snapshot or produce a summary again.
-      const key = adoptedKey(account.id)
-      const alreadyAdopted = await store.get<boolean>(key)
-      if (!alreadyAdopted) {
-        const before = await repo.loadState()
-        await saveUndoSnapshot(store, before)
-        await controller.sync()
-        const after = await repo.loadState()
-        // Set before the card is shown, so an interrupted session (a throw
-        // between here and the render) cannot re-run adoption either.
-        await store.set(key, true)
-        setAdoption(summariseAdoption(before, after))
-      } else {
-        await controller.sync()
-      }
-      setRounds(await repo.loadRounds())
-      setSyncStatus('idle')
-    } catch {
-      // A sync that fails is a sync that has not happened yet. Local data is
-      // untouched and the app stays fully usable.
-      setSyncStatus(navigator.onLine ? 'error' : 'offline')
+      await serialise(async () => {
+        // Signed out — with or without a wipe — while this was queued.
+        if (era.current !== startedIn) return
+        try {
+          // Adoption happens once per account per device, ever — guarded by a
+          // marker persisted in `store`, not by anything that resets on mount.
+          // Every sync after that marker is set (on focus, regaining the
+          // network, after a save, or on a later cold start) just synchronises
+          // and must not touch the undo snapshot or produce a summary again.
+          const key = adoptedKey(account.id)
+          const alreadyAdopted = await store.get<boolean>(key)
+          if (!alreadyAdopted) {
+            const before = await repo.loadState()
+            await saveUndoSnapshot(store, before)
+            await controller.sync()
+            const after = await repo.loadState()
+            // Set before the card is shown, so an interrupted session (a throw
+            // between here and the render) cannot re-run adoption either.
+            await store.set(key, true)
+            setAdoption(summariseAdoption(before, after))
+          } else {
+            await controller.sync()
+          }
+          setRounds(await repo.loadRounds())
+          setSyncStatus('idle')
+        } catch {
+          // A sync that fails is a sync that has not happened yet. Local data is
+          // untouched and the app stays fully usable.
+          setSyncStatus(navigator.onLine ? 'error' : 'offline')
+        }
+      })
+    } finally {
+      syncing.current = false
     }
-  }, [controller, account, repo, store])
+  }, [controller, account, repo, store, serialise])
 
   const undoAdoption = useCallback(async () => {
     if (!account) return
-    const snapshot = await takeUndoSnapshot(store)
-    if (!snapshot) return
-    await repo.replaceState(snapshot)
-    setRounds(await repo.loadRounds())
-    // Clear this device's memory of the merge, so a later sign-in to the same
-    // account adopts cleanly rather than resuming from a cursor already past
-    // the record it is trying to re-adopt.
-    await store.remove(adoptedKey(account.id))
-    await store.remove(cursorKey(account.id))
-    setAdoption(null)
-    // The only way this is genuinely reversible: the rounds already pushed to
-    // the account are not un-pushed, so staying signed in would just pull the
-    // merged record straight back on the next sync.
-    await authClient.signOut()
-  }, [store, repo, account, authClient])
+    // A debounced sync left over from the last save would push the merged
+    // record back down over the record being restored here.
+    cancelPendingSync()
+    era.current += 1
+    await serialise(async () => {
+      const snapshot = await takeUndoSnapshot(store)
+      if (!snapshot) return
+      await repo.replaceState(snapshot)
+      setRounds(await repo.loadRounds())
+      // Clear this device's memory of the merge, so a later sign-in to the same
+      // account adopts cleanly rather than resuming from a cursor already past
+      // the record it is trying to re-adopt.
+      await store.remove(adoptedKey(account.id))
+      await store.remove(cursorKey(account.id))
+      setAdoption(null)
+      // The only way this is genuinely reversible: the rounds already pushed to
+      // the account are not un-pushed, so staying signed in would just pull the
+      // merged record straight back on the next sync.
+      await authClient.signOut()
+    })
+  }, [store, repo, account, authClient, serialise, cancelPendingSync])
 
   const dismissAdoption = useCallback(() => {
     void clearUndoSnapshot(store)
@@ -241,23 +292,29 @@ export function AppProvider({
 
   const signOut = useCallback(
     async ({ wipeLocal }: { wipeLocal: boolean }) => {
-      if (wipeLocal && account) {
-        // Wipe first, so a failure is reported while the user is still in a
-        // state they recognise rather than after the screen has flipped to
-        // signed-out and told them the device is clean.
-        await repo.replaceState(emptySyncState())
-        setRounds([])
-        // The cursors describe a record this device no longer holds. Left
-        // behind, signing back in would pull nothing — every row on the server
-        // sits below the stored high-water mark — and the golfer would open an
-        // empty app that looks exactly like their history was destroyed.
-        await store.remove(cursorKey(account.id))
-        await store.remove(adoptedKey(account.id))
-      }
-      await authClient.signOut()
-      setSyncStatus('guest')
+      // A debounced sync must not fire against an account this device is
+      // leaving, least of all after a wipe has emptied the record.
+      cancelPendingSync()
+      era.current += 1
+      await serialise(async () => {
+        if (wipeLocal && account) {
+          // Wipe first, so a failure is reported while the user is still in a
+          // state they recognise rather than after the screen has flipped to
+          // signed-out and told them the device is clean.
+          await repo.replaceState(emptySyncState())
+          setRounds([])
+          // The cursors describe a record this device no longer holds. Left
+          // behind, signing back in would pull nothing — every row on the server
+          // sits below the stored high-water mark — and the golfer would open an
+          // empty app that looks exactly like their history was destroyed.
+          await store.remove(cursorKey(account.id))
+          await store.remove(adoptedKey(account.id))
+        }
+        await authClient.signOut()
+        setSyncStatus('guest')
+      })
     },
-    [authClient, repo, store, account],
+    [authClient, repo, store, account, serialise, cancelPendingSync],
   )
 
   const deleteAccount = useCallback(async () => {
@@ -289,7 +346,6 @@ export function AppProvider({
     }
   }, [controller, syncNow])
 
-  const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const scheduleSync = useCallback(() => {
     if (!controller) return
     if (syncTimer.current) clearTimeout(syncTimer.current)
@@ -297,12 +353,7 @@ export function AppProvider({
   }, [controller, syncNow])
 
   // Clear a pending debounced sync so it never fires after the provider is gone.
-  useEffect(
-    () => () => {
-      if (syncTimer.current) clearTimeout(syncTimer.current)
-    },
-    [],
-  )
+  useEffect(() => cancelPendingSync, [cancelPendingSync])
 
   const saveRound = useCallback(
     async (round: Round) => {

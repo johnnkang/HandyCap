@@ -1,6 +1,7 @@
 import type { Repository } from '@/data/repo/repository'
 import type { KeyValueStore } from '@/data/repo/store'
 import { syncOnce, type SyncCursors, type SyncOutcome } from './engine'
+import { mergeStates } from './merge'
 import type { RemoteStore } from './remote'
 
 export interface SyncController {
@@ -35,11 +36,18 @@ export function createSyncController({
       // A throw here — pulling or pushing — leaves local data exactly as it
       // was: nothing is written until the merge has come back whole.
       const outcome = await syncOnce(await repository.loadState(), remote, cursors)
+      // Re-read before writing. The sync spent a network round-trip in pull and
+      // push, and a round saved in that window exists only in local storage —
+      // blind-writing the snapshot we started from would destroy it, and it was
+      // never pushed, so it would be gone from everywhere. A concurrent
+      // deletion survives the same way: its tombstone is newer than the round
+      // the sync carried, so the merge keeps it deleted.
+      //
       // The record first, then the cursors. If the cursor write fails, the next
       // sync re-pulls and re-pushes rows the server already has, which the
       // merge absorbs idempotently. The reverse order would record progress for
       // a record that was never written.
-      await repository.replaceState(outcome.state)
+      await repository.replaceState(mergeStates(await repository.loadState(), outcome.state))
       await store.set(cursorKey(accountId), outcome.cursors)
       return outcome
     },

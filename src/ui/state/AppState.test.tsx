@@ -1,13 +1,14 @@
 import { describe, expect, test } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { renderWithState } from '@/test/ui'
 import { useAppState } from './AppState'
 import { scoresOfBogey, testRound } from '@/test/fixtures'
 import type { Round } from '@/domain/whs/types'
 import { createMemoryAuth } from '@/data/auth/auth'
-import { createMemoryRemote } from '@/data/sync/remote'
-import { createMemoryStore } from '@/data/repo/store'
+import { createMemoryRemote, type RemoteStore } from '@/data/sync/remote'
+import { createMemoryStore, type KeyValueStore } from '@/data/repo/store'
+import { createRepository, type Repository } from '@/data/repo/repository'
 
 /** Renders the state the rest of the app reads, so assertions stay on behaviour. */
 function Probe({ toAdd }: { toAdd?: Round } = {}) {
@@ -207,5 +208,167 @@ describe('adoption summary', () => {
     // assuming one implies the other.
     await waitFor(() => expect(screen.getByTestId('account')).toHaveTextContent('guest'))
     await waitFor(() => expect(screen.getByTestId('adoption')).toHaveTextContent('none'))
+  })
+})
+
+/**
+ * A remote whose pull hangs until the test lets it through, so a test can hold
+ * a sync at the network the way a slow signal at the course does.
+ */
+function gatedRemote(inner: RemoteStore) {
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let open = false
+  let pulls = 0
+  const remote: RemoteStore = {
+    ...inner,
+    async pull(since) {
+      pulls += 1
+      if (!open) await gate
+      return inner.pull(since)
+    },
+  }
+  return {
+    remote,
+    pulls: () => pulls,
+    open() {
+      open = true
+      release()
+    },
+  }
+}
+
+/** Surfaces everything the concurrency tests drive and observe. */
+function SyncProbe() {
+  const { rounds, account, syncStatus, adoption, loading, syncNow, signOut, undoAdoption } =
+    useAppState()
+  if (loading) return <p>loading</p>
+  return (
+    <div>
+      <p data-testid="rounds">{rounds.length}</p>
+      <p data-testid="account">{account?.email ?? 'guest'}</p>
+      <p data-testid="status">{syncStatus}</p>
+      <p data-testid="adoption">{adoption ? JSON.stringify(adoption) : 'none'}</p>
+      <button type="button" onClick={() => void syncNow()}>
+        sync again
+      </button>
+      <button type="button" onClick={() => void signOut({ wipeLocal: true })}>
+        wipe
+      </button>
+      <button type="button" onClick={() => void undoAdoption()}>
+        undo
+      </button>
+    </div>
+  )
+}
+
+const signedIn = () =>
+  createMemoryAuth({ account: { id: 'acct-1', email: 'golfer@example.com' } })
+
+describe('concurrent whole-record writes', () => {
+  test('a wiping sign-out is not undone by a sync already in flight', async () => {
+    const user = userEvent.setup()
+    const store = createMemoryStore()
+    const base = createRepository(createMemoryStore())
+    // The sync and the wipe both replace the whole record. Counting the writes
+    // is how the test waits for both without assuming which one goes first.
+    let writes = 0
+    const repository: Repository = {
+      ...base,
+      async replaceState(state) {
+        writes += 1
+        await base.replaceState(state)
+      },
+    }
+    const gated = gatedRemote(createMemoryRemote())
+
+    await renderWithState(<SyncProbe />, {
+      repository,
+      store,
+      auth: signedIn(),
+      rounds: [bogeyRound('a', '2026-05-01')],
+      remoteFor: () => gated.remote,
+    })
+
+    // Hold until the sync is genuinely out at the network.
+    await waitFor(() => expect(gated.pulls()).toBe(1))
+
+    // The golfer hands the borrowed phone back and taps "sign out and remove".
+    await user.click(screen.getByRole('button', { name: 'wipe' }))
+    gated.open()
+
+    await waitFor(() => expect(writes).toBe(2))
+    await waitFor(() => expect(screen.getByTestId('account')).toHaveTextContent('guest'))
+
+    // The device was told it was clean. It has to actually be clean.
+    expect(await repository.loadRounds()).toEqual([])
+    expect(await store.get('handycap:cursors:acct-1')).toBeUndefined()
+    expect(await store.get('handycap:adopted:acct-1')).toBeUndefined()
+  })
+
+  test('a second syncNow started mid-sync cannot spoil the undo snapshot', async () => {
+    const user = userEvent.setup()
+    const gated = gatedRemote(
+      createMemoryRemote([
+        {
+          roundId: 'b',
+          payload: bogeyRound('b', '2026-05-02'),
+          updatedAt: '2026-05-02T00:00:00.000Z',
+          deletedAt: null,
+        },
+      ]),
+    )
+
+    // The adoption marker is read from IndexedDB, and that read can be issued
+    // while the marker is still unset and land after the first sync has already
+    // merged the account in. Modelled here so the interleaving is deterministic
+    // rather than a race the test wins by luck.
+    const inner = createMemoryStore()
+    let markMerged!: () => void
+    const merged = new Promise<void>((resolve) => {
+      markMerged = resolve
+    })
+    let markerReads = 0
+    const store: KeyValueStore = {
+      ...inner,
+      async get<T>(key: string) {
+        if (key !== 'handycap:adopted:acct-1') return inner.get<T>(key)
+        markerReads += 1
+        const value = await inner.get<T>(key)
+        if (markerReads === 2) await merged
+        return value
+      },
+      async set<T>(key: string, value: T) {
+        await inner.set(key, value)
+        if (key === 'handycap:adopted:acct-1') markMerged()
+      },
+    }
+
+    const { repository } = await renderWithState(<SyncProbe />, {
+      store,
+      auth: signedIn(),
+      rounds: [bogeyRound('a', '2026-05-01')],
+      remoteFor: () => gated.remote,
+    })
+
+    await waitFor(() => expect(gated.pulls()).toBe(1))
+    // A second trigger — a focus event, or React's development double-mount —
+    // while the first sync is still out at the network.
+    await user.click(screen.getByRole('button', { name: 'sync again' }))
+    gated.open()
+
+    await waitFor(() => expect(screen.getByTestId('adoption')).not.toHaveTextContent('none'))
+    // Let anything the second call started run to completion before judging it.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+
+    // Undo has to restore the record as it was before this sign-in, not the
+    // merge it exists to reverse.
+    await user.click(screen.getByRole('button', { name: 'undo' }))
+    await waitFor(() => expect(screen.getByTestId('rounds')).toHaveTextContent('1'))
+    expect((await repository.loadRounds()).map((round) => round.id)).toEqual(['a'])
   })
 })
