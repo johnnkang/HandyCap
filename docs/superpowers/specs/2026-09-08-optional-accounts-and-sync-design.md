@@ -140,6 +140,18 @@ trade-off for offline last-write-wins; vector clocks are a great deal of
 machinery for an app where two devices editing the *same round* is already rare.
 Accepted deliberately.
 
+**Known limitation: the pull cursor is sequence-order, not commit-order.** The
+`BEFORE` trigger stamps a row's cursor from a sequence when the write starts,
+not when it commits, so two pushes overlapping by a fraction of a millisecond
+can commit in the opposite order to their cursors. A pull landing exactly
+between the two commits would see the higher cursor, advance past the lower one,
+and never be handed that row again on that device. Nothing is ever lost from the
+server — the row is there for any other device, and the next edit to it stamps a
+fresh cursor — so this hides a row from one device rather than destroying it.
+Closing it properly means commit-ordered sequencing, which is a real piece of
+database machinery for a sub-millisecond window in an app where two devices push
+at once only by coincidence. Accepted deliberately.
+
 ### Why sync rounds and never computed results
 
 The engine replays forward in time, and a backdated round revises the
