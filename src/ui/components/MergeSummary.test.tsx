@@ -8,6 +8,7 @@ import { createMemoryAuth } from '@/data/auth/auth'
 import { createMemoryRemote } from '@/data/sync/remote'
 import type { RemoteStore } from '@/data/sync/remote'
 import { createMemoryStore } from '@/data/repo/store'
+import { createRepository } from '@/data/repo/repository'
 import { useAppState } from '@/ui/state/AppState'
 
 const round = (id: string, date: string) => testRound({ id, date, strokes: scoresOfBogey() })
@@ -19,11 +20,21 @@ const remoteRound = (id: string, date: string) => ({
   deletedAt: null,
 })
 
-/** Surfaces the round count, so a test can watch undo actually restore data. */
+/**
+ * Surfaces the round count, sign-in state, and sync status, so a test can
+ * watch undo actually restore data and can wait for a sync to genuinely
+ * finish rather than for a coincidentally-already-true condition.
+ */
 function RoundsProbe() {
-  const { rounds, loading } = useAppState()
+  const { rounds, account, syncStatus, loading } = useAppState()
   if (loading) return <p>loading</p>
-  return <p data-testid="rounds">{rounds.length}</p>
+  return (
+    <div>
+      <p data-testid="rounds">{rounds.length}</p>
+      <p data-testid="account">{account?.email ?? 'guest'}</p>
+      <p data-testid="status">{syncStatus}</p>
+    </div>
+  )
 }
 
 /** Wraps a memory remote so a test can prove a second sync actually ran. */
@@ -46,7 +57,30 @@ describe('MergeSummary', () => {
     await renderWithState(<MergeSummary />, { rounds: [round('a', '2026-05-01')] })
     // A guest never syncs, so there is nothing to wait for — the absence holds.
     expect(screen.queryByText(/your account had/i)).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: 'Undo' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /undo/i })).not.toBeInTheDocument()
+  })
+
+  test('renders nothing when there is nothing to reconcile on either side', async () => {
+    const auth = createMemoryAuth({ account: { id: 'acct-1', email: 'golfer@example.com' } })
+
+    await renderWithState(
+      <>
+        <RoundsProbe />
+        <MergeSummary />
+      </>,
+      {
+        auth,
+        remoteFor: () => createMemoryRemote([]),
+        store: createMemoryStore(),
+      },
+    )
+
+    // Wait for the sync to actually settle, not just for the account to
+    // appear — otherwise this could pass by checking before `adoption` has
+    // been set at all, which would prove nothing about the `total === 0`
+    // guard.
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('idle'))
+    expect(screen.queryByText(/your account had/i)).not.toBeInTheDocument()
   })
 
   test('shows what the device had, what the account brought, and the total', async () => {
@@ -68,7 +102,7 @@ describe('MergeSummary', () => {
     expect(screen.getByText(/you now have 3/i)).toBeInTheDocument()
   })
 
-  test('Undo restores the pre-merge round count', async () => {
+  test('the undo action restores the pre-merge round count and leaves the user signed out', async () => {
     const user = userEvent.setup()
     const remote = createMemoryRemote([
       remoteRound('x1', '2026-04-01'),
@@ -93,9 +127,10 @@ describe('MergeSummary', () => {
     expect(await screen.findByText(/you now have 3/i)).toBeInTheDocument()
     expect(screen.getByTestId('rounds')).toHaveTextContent('3')
 
-    await user.click(screen.getByRole('button', { name: 'Undo' }))
+    await user.click(screen.getByRole('button', { name: 'Undo and sign out' }))
 
     await waitFor(() => expect(screen.getByTestId('rounds')).toHaveTextContent('1'))
+    expect(screen.getByTestId('account')).toHaveTextContent('guest')
     expect(screen.queryByText(/your account had/i)).not.toBeInTheDocument()
   })
 
@@ -125,6 +160,60 @@ describe('MergeSummary', () => {
     // routine syncs — not just about a card that was never re-checked.
     await waitFor(() => expect(pullCount()).toBeGreaterThan(pullsBeforeSecondSync))
 
+    expect(screen.queryByText(/your account had/i)).not.toBeInTheDocument()
+  })
+
+  test('an already-adopted device shows no card on a later mount', async () => {
+    // The bug this guards against: a `useRef` marker resets on every mount,
+    // so a returning signed-in user's session — restored on cold start,
+    // indistinguishable from a fresh sign-in — would re-run adoption and show
+    // a nonsense card every time the app opens. The marker must survive a
+    // whole new AppProvider instance, so this shares one `store` *and* one
+    // `repository` across two independent mounts, the way IndexedDB would
+    // survive an app restart in the real app.
+    const store = createMemoryStore()
+    const repository = createRepository(store)
+    const remote = createMemoryRemote([remoteRound('x1', '2026-04-01')])
+    const auth = createMemoryAuth({ account: { id: 'acct-1', email: 'golfer@example.com' } })
+
+    const first = await renderWithState(
+      <>
+        <RoundsProbe />
+        <MergeSummary />
+      </>,
+      {
+        auth,
+        remoteFor: () => remote,
+        store,
+        repository,
+        rounds: [round('a', '2026-05-01'), round('b', '2026-05-02')],
+      },
+    )
+    expect(await screen.findByText(/your account had 1 round\b/i)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('idle'))
+    first.unmount()
+
+    // A cold start: a brand-new provider tree, the same account still
+    // signed in, the same persisted store and repository — nothing new for
+    // the account to bring, since the previous sync already pulled it all
+    // down and this device already has all of it. The round count is already
+    // 3 before this mount's own sync even runs (it is the same persisted
+    // repository), so the thing worth waiting for is the *second* sync
+    // actually finishing — not a round count that was already correct.
+    await renderWithState(
+      <>
+        <RoundsProbe />
+        <MergeSummary />
+      </>,
+      {
+        auth,
+        remoteFor: () => remote,
+        store,
+        repository,
+      },
+    )
+    await waitFor(() => expect(screen.getByTestId('status')).toHaveTextContent('idle'))
+    expect(screen.getByTestId('rounds')).toHaveTextContent('3')
     expect(screen.queryByText(/your account had/i)).not.toBeInTheDocument()
   })
 })

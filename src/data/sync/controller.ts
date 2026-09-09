@@ -14,8 +14,14 @@ export interface SyncControllerOptions {
   accountId: string
 }
 
-/** Cursors are per account, so signing into a different one starts clean. */
-const cursorKey = (accountId: string) => `handycap:cursors:${accountId}`
+/**
+ * Cursors are per account, so signing into a different one starts clean.
+ *
+ * Exported so an undo that signs out can also clear this account's cursors —
+ * without that, a later sign-in to the same account would resume from a
+ * cursor already past the merged record and never re-adopt it.
+ */
+export const cursorKey = (accountId: string) => `handycap:cursors:${accountId}`
 
 export function createSyncController({
   repository,

@@ -202,7 +202,10 @@ describe('adoption summary', () => {
     await auth.signOut()
 
     // Signing out must not leave the card behind for the next guest session.
+    // Both fields settle from the same account-change effect, but not
+    // necessarily in the same commit, so each gets its own wait rather than
+    // assuming one implies the other.
     await waitFor(() => expect(screen.getByTestId('account')).toHaveTextContent('guest'))
-    expect(screen.getByTestId('adoption')).toHaveTextContent('none')
+    await waitFor(() => expect(screen.getByTestId('adoption')).toHaveTextContent('none'))
   })
 })

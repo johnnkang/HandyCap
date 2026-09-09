@@ -12,19 +12,24 @@ import type { SyncState } from './types'
 const UNDO_KEY = 'handycap:adoptionUndo'
 
 export interface AdoptionSummary {
-  /** Rounds on this device before signing in. */
-  before: number
-  /** Rounds the account brought that this device did not have. */
-  added: number
-  after: number
+  /** Rounds this device already held before signing in. */
+  onDevice: number
+  /** Rounds the account brought down that this device did not have. */
+  fromAccount: number
+  total: number
 }
 
+/**
+ * Named for what each number means to the person reading the card, because the
+ * obvious names invite exactly the wrong reading: the count of rounds that
+ * arrived is a property of the *account*, not of the device.
+ */
 export function summariseAdoption(before: SyncState, after: SyncState): AdoptionSummary {
   const had = new Set(before.rounds.map((entry) => entry.round.id))
   return {
-    before: before.rounds.length,
-    added: after.rounds.filter((entry) => !had.has(entry.round.id)).length,
-    after: after.rounds.length,
+    onDevice: before.rounds.length,
+    fromAccount: after.rounds.filter((entry) => !had.has(entry.round.id)).length,
+    total: after.rounds.length,
   }
 }
 

@@ -18,19 +18,19 @@ const stateOf = (...ids: string[]): SyncState => ({
 })
 
 describe('adoption', () => {
-  test('counts what the device contributed', () => {
+  test('separates what the device held from what the account brought', () => {
     expect(summariseAdoption(stateOf('a', 'b'), stateOf('a', 'b', 'c', 'd'))).toEqual({
-      before: 2,
-      added: 2,
-      after: 4,
+      onDevice: 2,
+      fromAccount: 2,
+      total: 4,
     })
   })
 
-  test('reports nothing added when the account already had everything', () => {
+  test('reports nothing arriving when the account had nothing new', () => {
     expect(summariseAdoption(stateOf('a'), stateOf('a'))).toEqual({
-      before: 1,
-      added: 0,
-      after: 1,
+      onDevice: 1,
+      fromAccount: 0,
+      total: 1,
     })
   })
 

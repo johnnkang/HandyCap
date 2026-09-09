@@ -16,7 +16,7 @@ import { createCourseCache, type CourseCache } from '@/data/repo/courseCache'
 import { createOpenGolfClient, type OpenGolfClient } from '@/data/opengolf/client'
 import { createMemoryAuth, type Account, type AuthClient } from '@/data/auth/auth'
 import { createSupabaseAuth } from '@/data/auth/supabase'
-import { createSyncController, type SyncController } from '@/data/sync/controller'
+import { createSyncController, cursorKey } from '@/data/sync/controller'
 import { createSupabaseRemote, supabaseConfigured } from '@/data/sync/supabase'
 import type { RemoteStore } from '@/data/sync/remote'
 import {
@@ -28,6 +28,14 @@ import {
 } from '@/data/sync/adoption'
 
 export type SyncStatus = 'guest' | 'idle' | 'syncing' | 'offline' | 'error'
+
+/**
+ * Whether this account has ever been adopted on this device, persisted
+ * beside the sync cursors rather than held in a ref — a ref resets on every
+ * mount, and a returning signed-in user's session is restored on cold start,
+ * which is indistinguishable from a fresh sign-in at that point.
+ */
+const adoptedKey = (accountId: string) => `handycap:adopted:${accountId}`
 
 interface AppState {
   rounds: Round[]
@@ -46,11 +54,19 @@ interface AppState {
   syncNow: () => Promise<void>
   auth: AuthClient
   /**
-   * Set once, by the first sync after a sign-in that merged this device's
-   * rounds into the account. Null otherwise — including for every later sync.
+   * Set once per account per device, by the first sync that ever merges this
+   * device's rounds into that account — a marker persisted in `store`, not a
+   * per-mount flag, because a returning signed-in user's session is restored
+   * on every cold start and would otherwise look like a fresh sign-in every
+   * time. Null on every later sync, and for a guest.
    */
   adoption: AdoptionSummary | null
-  /** Restore the device to how it was the moment before that first merge. */
+  /**
+   * The only thing this can honestly promise: the local record goes back to
+   * how it was before this sign-in, and the device signs out. Rounds already
+   * pushed to the account are not un-pushed — a real "undo" of the merge
+   * itself is not well-defined once the records are one thing.
+   */
   undoAdoption: () => Promise<void>
   /** Keep the merge, and stop showing the summary. */
   dismissAdoption: () => void
@@ -101,11 +117,6 @@ export function AppProvider({
   const [account, setAccount] = useState<Account | null>(null)
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('guest')
   const [adoption, setAdoption] = useState<AdoptionSummary | null>(null)
-  // Identifies the controller a merge summary has already been produced for,
-  // so only the first sync after a sign-in captures the undo snapshot and
-  // reports a summary — a fresh sign-in always gets a new controller, so
-  // comparing identity is enough, without threading account ids through here.
-  const adoptedControllerRef = useRef<SyncController | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -151,22 +162,27 @@ export function AppProvider({
   )
 
   const syncNow = useCallback(async () => {
-    if (!controller) {
+    if (!controller || !account) {
       setSyncStatus('guest')
       return
     }
     setSyncStatus('syncing')
     try {
-      // Only the very first sync for this controller — i.e. this sign-in — is
-      // a potential merge. Every later sync (on focus, regaining the network,
-      // after a save) just synchronises and must not touch the undo snapshot
-      // or produce a summary again.
-      if (adoptedControllerRef.current !== controller) {
+      // Adoption happens once per account per device, ever — guarded by a
+      // marker persisted in `store`, not by anything that resets on mount.
+      // Every sync after that marker is set (on focus, regaining the
+      // network, after a save, or on a later cold start) just synchronises
+      // and must not touch the undo snapshot or produce a summary again.
+      const key = adoptedKey(account.id)
+      const alreadyAdopted = await store.get<boolean>(key)
+      if (!alreadyAdopted) {
         const before = await repo.loadState()
         await saveUndoSnapshot(store, before)
         await controller.sync()
         const after = await repo.loadState()
-        adoptedControllerRef.current = controller
+        // Set before the card is shown, so an interrupted session (a throw
+        // between here and the render) cannot re-run adoption either.
+        await store.set(key, true)
         setAdoption(summariseAdoption(before, after))
       } else {
         await controller.sync()
@@ -178,15 +194,25 @@ export function AppProvider({
       // untouched and the app stays fully usable.
       setSyncStatus(navigator.onLine ? 'error' : 'offline')
     }
-  }, [controller, repo, store])
+  }, [controller, account, repo, store])
 
   const undoAdoption = useCallback(async () => {
+    if (!account) return
     const snapshot = await takeUndoSnapshot(store)
     if (!snapshot) return
     await repo.replaceState(snapshot)
     setRounds(await repo.loadRounds())
+    // Clear this device's memory of the merge, so a later sign-in to the same
+    // account adopts cleanly rather than resuming from a cursor already past
+    // the record it is trying to re-adopt.
+    await store.remove(adoptedKey(account.id))
+    await store.remove(cursorKey(account.id))
     setAdoption(null)
-  }, [store, repo])
+    // The only way this is genuinely reversible: the rounds already pushed to
+    // the account are not un-pushed, so staying signed in would just pull the
+    // merged record straight back on the next sync.
+    await authClient.signOut()
+  }, [store, repo, account, authClient])
 
   const dismissAdoption = useCallback(() => {
     void clearUndoSnapshot(store)
