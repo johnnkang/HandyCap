@@ -14,7 +14,7 @@ const SYNC_MESSAGE: Record<SyncStatus, string> = {
   error: "Couldn't reach the server. Your rounds are safe on this device.",
 }
 
-export function AccountScreen({ onClose }: { onClose?: () => void } = {}) {
+export function AccountScreen({ onClose }: { onClose: () => void }) {
   const { account, syncStatus, syncNow, auth } = useAppState()
 
   return (
@@ -71,6 +71,8 @@ function SignedOut({ onSendLink }: { onSendLink: (email: string) => Promise<void
     try {
       await onSendLink(trimmed)
       setSentTo(trimmed)
+    } catch {
+      setError("Couldn't send the link. Check your connection and try again.")
     } finally {
       setSending(false)
     }
@@ -79,7 +81,9 @@ function SignedOut({ onSendLink }: { onSendLink: (email: string) => Promise<void
   if (sentTo) {
     return (
       <section>
-        <p className="prose-note">Check your email — we sent a link to {sentTo}.</p>
+        <p className="prose-note" role="status">
+          Check your email — we sent a link to {sentTo}.
+        </p>
         <button
           type="button"
           className="tap chip mt-3"
@@ -118,7 +122,7 @@ function SignedOut({ onSendLink }: { onSendLink: (email: string) => Promise<void
           />
         </div>
         {error && (
-          <p className="prose-note" style={{ color: 'var(--amber)' }}>
+          <p className="prose-note" role="status" style={{ color: 'var(--amber)' }}>
             {error}
           </p>
         )}
