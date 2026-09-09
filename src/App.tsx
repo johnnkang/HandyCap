@@ -6,6 +6,7 @@ import { InsightsScreen } from './ui/screens/InsightsScreen'
 import { ForecastScreen } from './ui/screens/ForecastScreen'
 import { PostRoundScreen } from './ui/screens/PostRoundScreen'
 import { AboutScreen, useStoredTheme } from './ui/screens/AboutScreen'
+import { AccountScreen } from './ui/screens/AccountScreen'
 
 type Tab = 'index' | 'rounds' | 'insights' | 'forecast'
 
@@ -31,6 +32,7 @@ function Shell() {
   const [tab, setTab] = useState<Tab>('index')
   const [posting, setPosting] = useState(false)
   const [showAbout, setShowAbout] = useState(false)
+  const [showAccount, setShowAccount] = useState(false)
 
   // Restores the saved appearance choice on load.
   useStoredTheme()
@@ -73,7 +75,13 @@ function Shell() {
         </div>
       </header>
 
-      {showAbout && <AboutScreen onClose={() => setShowAbout(false)} />}
+      {showAbout && (
+        <AboutScreen
+          onClose={() => setShowAbout(false)}
+          onOpenAccount={() => setShowAccount(true)}
+        />
+      )}
+      {showAccount && <AccountScreen onClose={() => setShowAccount(false)} />}
 
       {tab === 'index' && <IndexScreen />}
       {tab === 'rounds' && <RoundsScreen />}

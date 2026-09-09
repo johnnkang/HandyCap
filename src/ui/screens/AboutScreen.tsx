@@ -40,7 +40,13 @@ export function useStoredTheme(): [ThemeChoice, (choice: ThemeChoice) => void] {
   return [choice, update]
 }
 
-export function AboutScreen({ onClose }: { onClose: () => void }) {
+export function AboutScreen({
+  onClose,
+  onOpenAccount,
+}: {
+  onClose: () => void
+  onOpenAccount: () => void
+}) {
   const { repository, reload, rounds } = useAppState()
   const [theme, setTheme] = useStoredTheme()
   const [status, setStatus] = useState<string | null>(null)
@@ -124,6 +130,13 @@ export function AboutScreen({ onClose }: { onClose: () => void }) {
               Import a backup
             </button>
           </div>
+          <button
+            type="button"
+            className="tap chip mt-3 w-full py-3"
+            onClick={onOpenAccount}
+          >
+            Account
+          </button>
           <input
             ref={fileInput}
             type="file"
