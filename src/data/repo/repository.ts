@@ -5,7 +5,7 @@ import type { KeyValueStore } from './store'
 /** Bump when the stored shape changes, and add a migration below. */
 export const CURRENT_SCHEMA_VERSION = 2
 
-/** v1 wrote a bare `Round[]` here. Read only, for the migration. */
+/** v1 wrote a bare `Round[]` here. Read once by the migration, then removed. */
 const LEGACY_ROUNDS_KEY = 'handycap:rounds'
 const STATE_KEY = 'handycap:sync'
 const VERSION_KEY = 'handycap:schemaVersion'
@@ -54,6 +54,10 @@ export function createRepository(
       tombstones: [],
     }
     await writeState(migrated)
+    // The v1 array is now a second, complete copy of the golfer's rounds that
+    // nothing reads and no sign-out wipes. Drop it once the migration has
+    // actually landed.
+    await store.remove(LEGACY_ROUNDS_KEY)
     return migrated
   }
 

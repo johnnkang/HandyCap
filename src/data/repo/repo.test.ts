@@ -108,6 +108,10 @@ describe('repository sync state', () => {
     const state = await repo.loadState()
     expect(state.rounds[0]!.updatedAt).toBe('2026-06-01T00:00:00.000Z')
     expect(await store.get('handycap:schemaVersion')).toBe(2)
+    // The v1 array is a full second copy of the record. Left behind it would
+    // survive "sign out and remove from this device", which is the one control
+    // that has to leave nothing on a borrowed phone.
+    expect(await store.get('handycap:rounds')).toBeUndefined()
   })
 
   test('an imported round is stamped so it will sync', async () => {

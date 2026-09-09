@@ -308,6 +308,28 @@ describe('concurrent whole-record writes', () => {
     expect(await store.get('handycap:adopted:acct-1')).toBeUndefined()
   })
 
+  test('a wiping sign-out leaves no copy of the rounds behind', async () => {
+    const user = userEvent.setup()
+    const store = createMemoryStore()
+
+    await renderWithState(<SyncProbe />, {
+      store,
+      auth: signedIn(),
+      rounds: [bogeyRound('a', '2026-05-01')],
+      remoteFor: () => createMemoryRemote(),
+    })
+
+    // The first sync keeps a full pre-merge copy of the record so the merge can
+    // be undone. A golfer who never taps "Looks right" never clears it.
+    await waitFor(() => expect(screen.getByTestId('adoption')).not.toHaveTextContent('none'))
+    expect(await store.get('handycap:adoptionUndo')).toBeDefined()
+
+    await user.click(screen.getByRole('button', { name: 'wipe' }))
+    await waitFor(() => expect(screen.getByTestId('account')).toHaveTextContent('guest'))
+
+    expect(await store.get('handycap:adoptionUndo')).toBeUndefined()
+  })
+
   test('a second syncNow started mid-sync cannot spoil the undo snapshot', async () => {
     const user = userEvent.setup()
     const gated = gatedRemote(

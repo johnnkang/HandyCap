@@ -309,6 +309,10 @@ export function AppProvider({
           // empty app that looks exactly like their history was destroyed.
           await store.remove(cursorKey(account.id))
           await store.remove(adoptedKey(account.id))
+          // The undo snapshot is a second, complete copy of the rounds, kept
+          // until the golfer taps "Looks right" — which many never will.
+          // "Remove from this device" has to mean that copy too.
+          await clearUndoSnapshot(store)
         }
         await authClient.signOut()
         setSyncStatus('guest')
