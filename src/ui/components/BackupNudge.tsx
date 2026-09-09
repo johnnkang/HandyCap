@@ -10,7 +10,7 @@ const DISMISSED_KEY = 'handycap:nudgeDismissed'
  * than a provisional one) and, once dismissed, stays gone for good.
  */
 export function BackupNudge({ onOpenAccount = () => {} }: { onOpenAccount?: () => void }) {
-  const { account, rounds, store } = useAppState()
+  const { account, rounds, store, accountsAvailable } = useAppState()
   // Starts unknown rather than false, so a dismissal already on record never
   // gets a one-frame flash before the store answers.
   const [dismissed, setDismissed] = useState<boolean | null>(null)
@@ -25,6 +25,10 @@ export function BackupNudge({ onOpenAccount = () => {} }: { onOpenAccount?: () =
     }
   }, [store])
 
+  // Offering to back up via an account that cannot exist in this build would
+  // be a dead-end tap, so the nudge itself is unavailable rather than shown
+  // with nothing behind it.
+  if (!accountsAvailable) return null
   if (account) return null
   if (rounds.length < 5) return null
   if (dismissed !== false) return null

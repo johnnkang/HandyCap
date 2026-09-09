@@ -47,6 +47,8 @@ export interface RenderOptions {
   remoteFor?: (accountId: string) => RemoteStore
   /** Defaults to a fresh memory store, so no test reaches IndexedDB. */
   store?: KeyValueStore
+  /** Overridable so tests can drive the account UI on or off directly. */
+  accountsAvailable?: boolean
 }
 
 export interface StatefulRender extends RenderResult {
@@ -68,6 +70,7 @@ export async function renderWithState(
     auth,
     remoteFor,
     store,
+    accountsAvailable,
   }: RenderOptions = {},
 ): Promise<StatefulRender> {
   const repository = supplied ?? createRepository(createMemoryStore())
@@ -81,6 +84,7 @@ export async function renderWithState(
       auth={auth}
       remoteFor={remoteFor}
       store={store ?? createMemoryStore()}
+      accountsAvailable={accountsAvailable}
     >
       {ui}
     </AppProvider>,

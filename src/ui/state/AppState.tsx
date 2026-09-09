@@ -90,6 +90,13 @@ interface AppState {
    * app keeps working as a guest afterwards.
    */
   deleteAccount: () => Promise<void>
+  /**
+   * Whether the account UI should exist in this build at all. False whenever
+   * Supabase is not configured — an unconfigured build has no real backend
+   * for an account to reach, so the UI must not offer one; see
+   * `supabaseConfigured()` in `@/data/sync/supabase`.
+   */
+  accountsAvailable: boolean
 }
 
 const AppStateContext = createContext<AppState | null>(null)
@@ -108,6 +115,14 @@ export interface AppProviderProps {
    * `repository` override this one is load-bearing for tests.
    */
   store?: KeyValueStore
+  /**
+   * Overridable so tests can drive the account UI without an env-configured
+   * Supabase project. Defaults to `supabaseConfigured()` when omitted, unless
+   * an `auth` fake is supplied without it — a test that bothers to inject an
+   * auth client is exercising the account UI on its own terms and should not
+   * also have to fake Supabase configuration to see it.
+   */
+  accountsAvailable?: boolean
 }
 
 export function AppProvider({
@@ -118,6 +133,7 @@ export function AppProvider({
   auth,
   remoteFor,
   store: suppliedStore,
+  accountsAvailable: suppliedAccountsAvailable,
 }: AppProviderProps) {
   const store = useMemo(() => suppliedStore ?? createIndexedDbStore(), [suppliedStore])
   const repo = useMemo(() => repository ?? createRepository(store), [repository, store])
@@ -131,6 +147,7 @@ export function AppProvider({
     () => remoteFor ?? ((accountId: string) => createSupabaseRemote(accountId)),
     [remoteFor],
   )
+  const accountsAvailable = suppliedAccountsAvailable ?? (auth ? true : supabaseConfigured())
 
   const [rounds, setRounds] = useState<Round[]>([])
   const [loading, setLoading] = useState(true)
@@ -451,6 +468,7 @@ export function AppProvider({
       dismissAdoption,
       signOut,
       deleteAccount,
+      accountsAvailable,
     }),
     [
       rounds,
@@ -472,6 +490,7 @@ export function AppProvider({
       dismissAdoption,
       signOut,
       deleteAccount,
+      accountsAvailable,
     ],
   )
 

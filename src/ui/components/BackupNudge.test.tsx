@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { screen } from '@testing-library/react'
+import { act, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { renderWithState } from '@/test/ui'
 import { createMemoryAuth } from '@/data/auth/auth'
@@ -20,8 +20,18 @@ describe('BackupNudge', () => {
   })
 
   test('appears once the index means something', async () => {
-    await renderWithState(<BackupNudge />, { rounds: rounds(5) })
+    await renderWithState(<BackupNudge />, { rounds: rounds(5), accountsAvailable: true })
     expect(await screen.findByText(/only on this (phone|device)/i)).toBeInTheDocument()
+  })
+
+  test('never appears when accounts are unavailable, even with rounds to back up', async () => {
+    // Offering to back up via an account that cannot exist would be a dead
+    // end — the nudge itself must not exist in an unconfigured build.
+    await renderWithState(<BackupNudge />, { rounds: rounds(8), accountsAvailable: false })
+    // Give the nudge's own async dismissal lookup a chance to resolve, so this
+    // is asserting the settled state rather than a one-frame render before it.
+    await act(async () => {})
+    expect(screen.queryByText(/only on this (phone|device)/i)).not.toBeInTheDocument()
   })
 
   test('never appears for a signed-in golfer', async () => {
@@ -41,12 +51,18 @@ describe('BackupNudge', () => {
     const { unmount, repository } = await renderWithState(<BackupNudge />, {
       rounds: rounds(6),
       store,
+      accountsAvailable: true,
     })
     await userEvent.click(await screen.findByRole('button', { name: /no thanks/i }))
     expect(screen.queryByText(/only on this (phone|device)/i)).not.toBeInTheDocument()
 
     unmount()
-    await renderWithState(<BackupNudge />, { rounds: rounds(6), repository, store })
+    await renderWithState(<BackupNudge />, {
+      rounds: rounds(6),
+      repository,
+      store,
+      accountsAvailable: true,
+    })
     expect(screen.queryByText(/only on this (phone|device)/i)).not.toBeInTheDocument()
   })
 })

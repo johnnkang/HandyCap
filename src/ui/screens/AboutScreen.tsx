@@ -49,7 +49,7 @@ export function AboutScreen({
   onOpenAccount: () => void
   onOpenPrivacy: () => void
 }) {
-  const { repository, reload, rounds, account } = useAppState()
+  const { repository, reload, rounds, account, accountsAvailable } = useAppState()
   const [theme, setTheme] = useStoredTheme()
   const [status, setStatus] = useState<string | null>(null)
   const fileInput = useRef<HTMLInputElement>(null)
@@ -151,13 +151,15 @@ export function AboutScreen({
               Import a backup
             </button>
           </div>
-          <button
-            type="button"
-            className="tap chip mt-3 w-full py-3"
-            onClick={onOpenAccount}
-          >
-            Account
-          </button>
+          {accountsAvailable && (
+            <button
+              type="button"
+              className="tap chip mt-3 w-full py-3"
+              onClick={onOpenAccount}
+            >
+              Account
+            </button>
+          )}
           <input
             ref={fileInput}
             type="file"
