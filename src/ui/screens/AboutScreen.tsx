@@ -124,9 +124,11 @@ export function AboutScreen({
             </p>
           ) : (
             <p className="prose-note mb-3">
-              As a guest, everything lives on this device and nothing is sent anywhere. That
-              also means a lost phone is a lost record — export a backup now and then, or add
-              an account to sync your rounds to a server and keep them on other devices too.
+              As a guest, your rounds, scores, and Index are stored only on this device —
+              that also means a lost phone is a lost record, so export a backup now and then,
+              or add an account to sync them to a server and keep them on other devices too.
+              Searching for a course does send the text you type to OpenGolfAPI so it can look
+              up that course's ratings; nothing else about you goes with it.
             </p>
           )}
           <button
