@@ -19,6 +19,7 @@ import { createSupabaseAuth } from '@/data/auth/supabase'
 import { createSyncController, cursorKey } from '@/data/sync/controller'
 import { createSupabaseRemote, supabaseConfigured } from '@/data/sync/supabase'
 import type { RemoteStore } from '@/data/sync/remote'
+import { emptySyncState } from '@/data/sync/types'
 import {
   clearUndoSnapshot,
   saveUndoSnapshot,
@@ -70,6 +71,19 @@ interface AppState {
   undoAdoption: () => Promise<void>
   /** Keep the merge, and stop showing the summary. */
   dismissAdoption: () => void
+  /**
+   * Sign out. By default local rounds are left exactly as they are — signing
+   * out should never be the way someone loses their history. `wipeLocal` is
+   * for a borrowed or shared phone, where the point is to leave nothing
+   * behind.
+   */
+  signOut: (options: { wipeLocal: boolean }) => Promise<void>
+  /**
+   * Delete the account itself: the synced rows and the auth user. Local
+   * rounds are deliberately untouched — they are still the golfer's, and the
+   * app keeps working as a guest afterwards.
+   */
+  deleteAccount: () => Promise<void>
 }
 
 const AppStateContext = createContext<AppState | null>(null)
@@ -219,6 +233,28 @@ export function AppProvider({
     setAdoption(null)
   }, [store])
 
+  const signOut = useCallback(
+    async ({ wipeLocal }: { wipeLocal: boolean }) => {
+      await authClient.signOut()
+      if (wipeLocal) {
+        await repo.replaceState(emptySyncState())
+        setRounds([])
+      }
+      setSyncStatus('guest')
+    },
+    [authClient, repo],
+  )
+
+  const deleteAccount = useCallback(async () => {
+    // The rows go first: if deleting the auth user fails, the golf data is
+    // already gone, which is the safer half to lose.
+    if (account) await makeRemote(account.id).deleteEverything()
+    await authClient.deleteAccount()
+    setSyncStatus('guest')
+    // Local data is deliberately untouched. It is still theirs, and the app
+    // keeps working as a guest.
+  }, [account, authClient, makeRemote])
+
   // Sync on sign-in, on returning to the app, and on regaining the network.
   useEffect(() => {
     if (!controller) {
@@ -298,6 +334,8 @@ export function AppProvider({
       adoption,
       undoAdoption,
       dismissAdoption,
+      signOut,
+      deleteAccount,
     }),
     [
       rounds,
@@ -316,6 +354,8 @@ export function AppProvider({
       adoption,
       undoAdoption,
       dismissAdoption,
+      signOut,
+      deleteAccount,
     ],
   )
 

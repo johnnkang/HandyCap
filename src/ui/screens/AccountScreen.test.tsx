@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { renderWithState } from '@/test/ui'
 import { createMemoryAuth } from '@/data/auth/auth'
 import { createMemoryRemote } from '@/data/sync/remote'
+import { testRound } from '@/test/fixtures'
 import { AccountScreen } from './AccountScreen'
 
 describe('AccountScreen', () => {
@@ -60,5 +61,65 @@ describe('AccountScreen', () => {
     ).toBeInTheDocument()
     expect(screen.getByLabelText(/email/i)).toHaveValue('golfer@example.com')
     expect(screen.getByRole('button', { name: /email me a link/i })).toBeInTheDocument()
+  })
+})
+
+describe('leaving', () => {
+  const signedIn = () => createMemoryAuth({ account: { id: 'acct-1', email: 'golfer@example.com' } })
+
+  test('signing out keeps the rounds on the device', async () => {
+    const auth = signedIn()
+    await renderWithState(<AccountScreen />, {
+      auth,
+      remoteFor: () => createMemoryRemote(),
+      rounds: [testRound({ id: 'a', date: '2026-05-01', totalStrokes: 90 })],
+    })
+
+    await userEvent.click(await screen.findByRole('button', { name: /^sign out$/i }))
+
+    expect(await screen.findByText(/only on this (phone|device)/i)).toBeInTheDocument()
+    expect(await screen.findByText(/1 round is still on this device/i)).toBeInTheDocument()
+  })
+
+  test('offers a separate sign out that removes local data', async () => {
+    const auth = signedIn()
+    const { repository } = await renderWithState(<AccountScreen />, {
+      auth,
+      remoteFor: () => createMemoryRemote(),
+      rounds: [testRound({ id: 'a', date: '2026-05-01', totalStrokes: 90 })],
+    })
+
+    await userEvent.click(await screen.findByRole('button', { name: /remove.*this device/i }))
+    await userEvent.click(await screen.findByRole('button', { name: /yes, remove/i }))
+
+    expect(await repository.loadRounds()).toEqual([])
+  })
+
+  test('deleting the account needs the email typed to confirm', async () => {
+    const auth = signedIn()
+    await renderWithState(<AccountScreen />, { auth, remoteFor: () => createMemoryRemote() })
+
+    await userEvent.click(await screen.findByRole('button', { name: /delete my account/i }))
+    const confirm = await screen.findByRole('button', { name: /permanently delete/i })
+    expect(confirm).toBeDisabled()
+
+    await userEvent.type(screen.getByLabelText(/type your email/i), 'golfer@example.com')
+    expect(confirm).toBeEnabled()
+  })
+
+  test('deleting the account leaves the local rounds alone', async () => {
+    const auth = signedIn()
+    const { repository } = await renderWithState(<AccountScreen />, {
+      auth,
+      remoteFor: () => createMemoryRemote(),
+      rounds: [testRound({ id: 'a', date: '2026-05-01', totalStrokes: 90 })],
+    })
+
+    await userEvent.click(await screen.findByRole('button', { name: /delete my account/i }))
+    await userEvent.type(screen.getByLabelText(/type your email/i), 'golfer@example.com')
+    await userEvent.click(screen.getByRole('button', { name: /permanently delete/i }))
+
+    expect(await screen.findByText(/only on this (phone|device)/i)).toBeInTheDocument()
+    expect((await repository.loadRounds()).map((r) => r.id)).toEqual(['a'])
   })
 })
